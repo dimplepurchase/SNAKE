@@ -1,12 +1,33 @@
+import os
+import json
 from flask import Flask, render_template_string, request, redirect, url_for, session, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
-import sqlite3, webbrowser, threading, time, uuid, csv, json
+import time, uuid, csv
 from io import StringIO
+
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 app = Flask(__name__)
 app.secret_key = 'cashbook_secure_secret_key_12345'
 
+# --- FIREBASE SECURE INITIALIZATION ---
+try:
+    if 'FIREBASE_CREDENTIALS' in os.environ:
+        cred_dict = json.loads(os.environ['FIREBASE_CREDENTIALS'], strict=False)
+        cred = credentials.Certificate(cred_dict)
+    elif os.path.exists('cash.json'):
+        cred = credentials.Certificate('cash.json')
+    else:
+        raise FileNotFoundError("Missing Firebase keys. Add FIREBASE_CREDENTIALS in Vercel settings.")
+
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(cred)
+        
+    db = firestore.client()
+except Exception as e:
+    print(f"🔥 FIREBASE ERROR: Could not initialize. Details: {e}")
 # --- HTML TEMPLATES & CSS ---
 
 BASE_STYLE = '''
@@ -1228,6 +1249,5 @@ def register():
 def logout(): session.clear(); return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    init_db()
-    threading.Thread(target=lambda: (time.sleep(1.5), webbrowser.open_new("http://127.0.0.1:5000"))).start()
-    app.run(debug=True, use_reloader=False)
+    # (Removed webbrowser launch logic since this runs on a cloud server)
+    pass

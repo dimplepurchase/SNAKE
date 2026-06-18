@@ -1,33 +1,42 @@
+import firebase_admin
+from firebase_admin import credentials, firestore
+from flask import Flask, render_template_string, request, redirect, url_for, session, flash, send_file
+from datetime import datetime, timedelta, timezone
+import pandas as pd
 import os
+import math
 import json
-from flask import Flask, render_template_string, request, redirect, url_for, session, Response
+
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, timedelta
 import time, uuid, csv
 from io import StringIO
 
-import firebase_admin
-from firebase_admin import credentials, firestore
-
+# ==========================================
+# 1. CONFIGURATION
+# ==========================================
 app = Flask(__name__)
-app.secret_key = 'cashbook_secure_secret_key_12345'
+app.secret_key = 'secure_key_v46_search_approvedby_restored'
 
-# --- FIREBASE SECURE INITIALIZATION ---
-try:
-    if 'FIREBASE_CREDENTIALS' in os.environ:
-        cred_dict = json.loads(os.environ['FIREBASE_CREDENTIALS'], strict=False)
+# --- AUTO LOGOUT CONFIGURATION ---
+app.permanent_session_lifetime = timedelta(minutes=15)
+
+# --- FIREBASE SETUP START ---
+# Fetching the variable from Railway Environment Variables
+firebase_creds_json = os.getenv('FIREBASE_CONFIG')
+
+if firebase_creds_json:
+    try:
+        cred_dict = json.loads(firebase_creds_json)
         cred = credentials.Certificate(cred_dict)
-    elif os.path.exists('cash.json'):
-        cred = credentials.Certificate('cash.json')
-    else:
-        raise FileNotFoundError("Missing Firebase keys. Add FIREBASE_CREDENTIALS in Vercel settings.")
-
-    if not firebase_admin._apps:
         firebase_admin.initialize_app(cred)
-        
-    db = firestore.client()
-except Exception as e:
-    print(f"🔥 FIREBASE ERROR: Could not initialize. Details: {e}")
+        print("Firebase successfully initialized!")
+    except Exception as e:
+        print(f"Error parsing JSON or initializing Firebase: {e}")
+else:
+    print("CRITICAL ERROR: FIREBASE_CONFIG environment variable not found!")
+
+db = firestore.client()
+
 # --- HTML TEMPLATES & CSS ---
 
 BASE_STYLE = '''
@@ -1248,6 +1257,6 @@ def register():
 @app.route('/logout')
 def logout(): session.clear(); return redirect(url_for('login'))
 
-if __name__ == '__main__':
-    # (Removed webbrowser launch logic since this runs on a cloud server)
-    pass
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)

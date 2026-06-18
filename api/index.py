@@ -1,41 +1,33 @@
-import firebase_admin
-from firebase_admin import credentials, firestore
-from flask import Flask, render_template_string, request, redirect, url_for, session, flash, send_file
-from datetime import datetime, timedelta, timezone
-import pandas as pd
 import os
-import math
 import json
-
+from flask import Flask, render_template_string, request, redirect, url_for, session, Response
 from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime, timedelta
 import time, uuid, csv
 from io import StringIO
 
-# ==========================================
-# 1. CONFIGURATION
-# ==========================================
+import firebase_admin
+from firebase_admin import credentials, firestore
+
 app = Flask(__name__)
-app.secret_key = 'secure_key_v46_search_approvedby_restored'
+app.secret_key = 'cashbook_secure_secret_key_12345'
 
-# --- AUTO LOGOUT CONFIGURATION ---
-app.permanent_session_lifetime = timedelta(minutes=15)
-
-# --- FIREBASE SETUP START ---
-# Fetching the variable from Railway Environment Variables
-firebase_creds_json = os.getenv('FIREBASE_CONFIG')
-
-if firebase_creds_json:
-    try:
-        cred_dict = json.loads(firebase_creds_json)
+# --- FIREBASE SECURE INITIALIZATION ---
+try:
+    if 'FIREBASE_CREDENTIALS' in os.environ:
+        cred_dict = json.loads(os.environ['FIREBASE_CREDENTIALS'], strict=False)
         cred = credentials.Certificate(cred_dict)
-        firebase_admin.initialize_app(cred)
-        print("Firebase successfully initialized!")
-    except Exception as e:
-        print(f"Error parsing JSON or initializing Firebase: {e}")
-else:
-    print("CRITICAL ERROR: FIREBASE_CONFIG environment variable not found!")
+    elif os.path.exists('cash.json'):
+        cred = credentials.Certificate('cash.json')
+    else:
+        raise FileNotFoundError("Missing Firebase keys. Add FIREBASE_CREDENTIALS in Vercel settings.")
 
-db = firestore.client()
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(cred)
+        
+    db = firestore.client()
+except Exception as e:
+    print(f"🔥 FIREBASE ERROR: Could not initialize. Details: {e}")
 
 # --- HTML TEMPLATES & CSS ---
 
@@ -156,7 +148,7 @@ SPLASH_HTML = '''
                     setTimeout(() => { splash.style.display = 'none'; }, 500);
                     sessionStorage.setItem('splashShown', 'true');
                 }
-            }, 1800);
+            }, 1500);
         });
     }
 </script>
@@ -170,544 +162,38 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print">
     <a href="/reports" class="{% if active_page == 'reports' %}active{% endif %}" style="background: rgba(16, 185, 129, 0.2); color: #065f46;">📊 Reports</a>
     {% if session.get('can_approve') == 1 %}<a href="/approvals" class="{% if active_page == 'approvals' %}active{% endif %}" style="background: var(--warning);">✅ Apprv</a>{% endif %}
     <a href="/trash" class="{% if active_page == 'trash' %}active{% endif %}" style="background: rgba(239, 68, 68, 0.2); color: #991b1b;">🗑️ Trash</a>
-    {% if session.get('role') == 'superadmin' %}
-        <a href="/manage_users" class="{% if active_page == 'users' %}active{% endif %}" style="background: #8b5cf6;">⚙️ Users</a>
-        <a href="/download_cash_json" style="background: #f97316; color: white;">🔥 Get cash.json</a>
-    {% endif %}
+    {% if session.get('role') == 'superadmin' %}<a href="/manage_users" class="{% if active_page == 'users' %}active{% endif %}" style="background: #8b5cf6;">⚙️ Users</a>{% endif %}
     <span style="color: rgba(255,255,255,0.9); margin-left: auto; font-size: 0.9em; font-weight: 500;">User: <strong>{{ username }}</strong> <small>({{ session.get('role')|title }})</small></span>
     <a href="/logout" class="logout" style="padding: 6px 12px; font-size:0.9em;" onclick="sessionStorage.removeItem('splashShown');">Logout</a>
 </div>'''
 
-REGISTER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Setup</title>''' + BASE_STYLE + '''</head><body><div class="container"><div class="card" style="max-width: 450px; margin: 80px auto; text-align: center;">
-    <h2 style="color: var(--primary);">Setup Superadmin</h2>
-    <form action="/register" method="POST" style="text-align: left;">
-        <div class="form-group"><label>Firm Name</label><input type="text" name="firm_name" required></div>
-        <div class="form-group"><label>Opening Cash Book Balance (₹)</label><input type="number" step="0.01" min="0" name="opening_balance" value="0" required></div>
-        <div class="form-group"><label>Superadmin Username</label><input type="text" name="username" required></div>
-        <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
-        <button type="submit" style="width: 100%;">Initialize Firm Account</button>
-    </form></div></div></body></html>'''
-
+# Other template blocks omitted for space (Keep your exact templates from previous messages)
+REGISTER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Setup</title>''' + BASE_STYLE + '''</head><body><div class="container"><div class="card" style="max-width: 450px; margin: 80px auto; text-align: center;"><h2 style="color: var(--primary);">Setup Superadmin</h2><form action="/register" method="POST" style="text-align: left;"><div class="form-group"><label>Firm Name</label><input type="text" name="firm_name" required></div><div class="form-group"><label>Opening Cash Book Balance (₹)</label><input type="number" step="0.01" min="0" name="opening_balance" value="0" required></div><div class="form-group"><label>Superadmin Username</label><input type="text" name="username" required></div><div class="form-group"><label>Password</label><input type="password" name="password" required></div><button type="submit" style="width: 100%;">Initialize Firm Account</button></form></div></div></body></html>'''
 LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>Login</title>''' + BASE_STYLE + '''</head><body><div class="container"><div class="card" style="max-width: 400px; margin: 100px auto; text-align: center;"><h2>Welcome Back</h2><form action="/login" method="POST" style="text-align: left;"><div class="form-group"><label>Username</label><input type="text" name="username" required></div><div class="form-group"><label>Password</label><input type="password" name="password" required></div><button type="submit" style="width: 100%;">Secure Login</button></form></div></div></body></html>'''
+TRASH_TEMPLATE = '''<!DOCTYPE html><html><head><title>Trash</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #fee2e2; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #991b1b;">🗑️ Deleted Vouchers & Entries (Trash)</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Category / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>{% for t in trashed %}<tr><td style="padding-left: 20px;"><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td><td><span class="badge badge-mode">{{ t.category }}</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td><td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td><td style="text-align: center;"><a href="/restore_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Restore this transaction?');">♻️ Restore</a><a href="/hard_delete_voucher/{{ t.link_id }}" class="btn btn-sm" style="background:#dc2626; color:white; margin-left:5px;" onclick="return confirm('Permanently delete? This cannot be undone.');">🔥 Delete Forever</a></td></tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">Trash is empty.</td></tr>{% endfor %}</table></div></div></body></html>'''
+REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dynamic Reports</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card no-print" style="padding: 25px; margin-bottom: 25px;"><h3 style="margin-bottom: 15px; font-size: 1.3em;">📊 Generate Report</h3><form method="GET" action="/reports" style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end;"><div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}"></div><div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" value="{{ end_date }}"></div><div class="form-group flex-1" style="min-width: 200px;"><label>Category Filter</label><select name="category"><option value="">-- All Categories --</option>{% for c in categories %}<option value="{{ c }}" {% if category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div><div class="form-group flex-1" style="min-width: 250px;"><label>Select Account / Ledger</label><select name="report_account" style="font-weight:bold; color:var(--primary);"><option value="main" {% if report_account == 'main' %}selected{% endif %}>🏢 Main Cash Book</option><optgroup label="👥 Person Ledgers">{% for p in persons %}<option value="person_{{ p.id }}" {% if report_account == 'person_'~p.id|string %}selected{% endif %}>👤 {{ p.name }}</option>{% endfor %}</optgroup><optgroup label="💸 Dasti Ledgers">{% for d in dasti_persons %}<option value="dasti_{{ d.id }}" {% if report_account == 'dasti_'~d.id|string %}selected{% endif %}>💸 {{ d.name }}</option>{% endfor %}</optgroup></select></div><button class="btn-success" type="submit" style="padding: 10px 25px; height: 45px;">Generate</button></form></div><div class="no-print" style="margin-bottom: 20px; display: flex; gap: 10px; justify-content: flex-end;"><button onclick="window.print()" class="btn btn-outline" style="background: white;">🖨️ Print Report</button><a href="{{ url_for('export_reports', start_date=start_date, end_date=end_date, category=category, report_account=report_account) }}" class="btn btn-success" style="background: #10b981;">📥 Download Excel (CSV)</a></div><div class="stats-grid"><div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Report Incomes / Received</h4><div class="value" style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in) }}</div></div><div class="stat-card" style="border-top: 4px solid var(--danger);"><h4>Report Expenses / Advances</h4><div class="value" style="color: var(--danger);">- ₹{{ "{:,.2f}".format(total_out) }}</div></div><div class="stat-card" style="border-top: 4px solid var(--primary); background: #f8fafc;"><h4>Report Net Flow</h4><div class="value">{% if (total_in - total_out) >= 0 %}<span style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in - total_out) }}</span>{% else %}<span style="color: var(--danger);">- ₹{{ "{:,.2f}".format((total_in - total_out)|abs) }}</span>{% endif %}</div></div></div><div class="card" style="padding: 0; overflow-x: auto;"><h3 style="padding: 18px 25px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border);">Report Results</h3><table style="width: 100%; min-width: 800px;"><thead><tr><th style="padding-left: 25px; width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 50%;">Detail</th><th style="text-align: right; width: 20%;">Amount</th></tr></thead><tbody>{% for txn in results %}<tr><td style="padding-left: 25px;"><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td><td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td><td style="white-space: pre-wrap;">{{ txn.description }}{% if txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}</td><td style="text-align: right;">{% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'advance'] %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(txn.amount) }}</span>{% else %}<span class="badge badge-in">+ ₹{{ "{:,.2f}".format(txn.amount) }}</span>{% endif %}</td></tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No records found.</td></tr>{% endfor %}</tbody></table></div></div></body></html>'''
+USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="margin-bottom: 20px; padding: 20px;"><h3 style="font-size: 1.2em;">👤 Create New Firm User</h3><form action="/add_user" method="POST" style="display:flex; gap:15px; align-items: flex-end; flex-wrap:wrap;"><div class="form-group flex-1"><label>Username</label><input type="text" name="new_username" required></div><div class="form-group flex-1"><label>Password</label><input type="password" name="new_password" required></div><div class="form-group flex-1"><label>Role</label><select name="role" required><option value="admin">Admin</option><option value="superadmin">Superadmin</option><option value="cashier">Cashier</option><option value="market">Market</option></select></div><div class="form-group" style="padding-bottom: 10px;"><label><input type="checkbox" name="can_approve" value="1"> Grant Approval Rights</label></div><button class="btn-success" type="submit" style="padding: 10px 25px; height: 45px;">Create User</button></form></div><div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">🛡️ Registered Firm Users</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Username</th><th>Role</th><th>Approver</th><th style="text-align:center;">Action</th></tr>{% for u in users %}<tr><td style="padding-left: 20px; font-weight: 500;">{{ u.username }}</td><td><span class="badge badge-mode">{{ u.role|title }}</span></td><td>{% if u.can_approve %}<span class="badge badge-success" style="background:#d1fae5; color:#065f46;">Yes</span>{% else %}<span class="badge badge-danger" style="background:#fee2e2; color:#991b1b;">No</span>{% endif %}</td><td style="text-align: center;"><a href="/edit_user/{{ u.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️ Edit User</a></td></tr>{% endfor %}</table></div></div></body></html>'''
+EDIT_USER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit User</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="max-width: 500px; margin: 0 auto;"><h2 style="color: var(--primary); margin-bottom: 20px;">⚙️ Edit User Profile</h2><form action="/edit_user/{{ edit_user.id }}" method="POST"><div class="form-group"><label>Username</label><input type="text" name="username" value="{{ edit_user.username }}" required></div><div class="form-group"><label>New Password <small>(Leave blank to keep current)</small></label><input type="password" name="password"></div><div class="form-group"><label>User Role</label><select name="role" required><option value="superadmin" {% if edit_user.role == 'superadmin' %}selected{% endif %}>Superadmin</option><option value="admin" {% if edit_user.role == 'admin' %}selected{% endif %}>Admin</option><option value="cashier" {% if edit_user.role == 'cashier' %}selected{% endif %}>Cashier</option><option value="market" {% if edit_user.role == 'market' %}selected{% endif %}>Market</option></select></div><div class="form-group" style="padding-bottom: 15px; margin-top: 10px;"><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_approve" value="1" {% if edit_user.can_approve %}checked{% endif %} style="width: auto;"> Grant Voucher Approval Rights</label></div><div style="display: flex; gap: 15px;"><a href="/manage_users" class="btn btn-outline" style="flex:1;">Cancel</a><button class="btn-success" type="submit" style="flex:1;">Save Updates</button></div></form></div></div></body></html>'''
+APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Pending Approvals</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #fef08a; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #92400e;">⏳ Pending Advanced Vouchers</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Description / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>{% for t in pending %}<tr><td style="padding-left: 20px;"><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td><td><span class="badge badge-pending">Pending</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td><td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td><td style="text-align: center;"><a href="/approve_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Approve this transaction?');">✅ Approve</a> <a href="/reject_voucher/{{ t.link_id }}" class="btn btn-sm btn-danger" onclick="return confirm('Reject & Delete this transaction?');">❌ Reject</a></td></tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No pending vouchers requiring approval.</td></tr>{% endfor %}</table></div></div></body></html>'''
+EXPRESS_ENTRY_HTML = '''<div class="express-entry no-print"><h3 style="margin-top: 0; color: #3730a3; font-size: 1.15em;">🚀 Express Direct Entry (Main Book)</h3><form action="/add_express" method="POST" style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;"><input type="hidden" name="date" id="express_date"><input type="hidden" name="time" id="express_time"><input type="text" name="description" placeholder="Description / Reason" required style="flex: 3; min-width: 200px; border-color: #a5b4fc;"><select name="type" required style="flex: 1; min-width: 150px; font-weight: bold; border-color: #a5b4fc;"><option value="income">➕ Cash In</option><option value="expense">➖ Cash Out</option></select><input type="number" step="0.01" min="0" name="amount" placeholder="Amount (₹)" value="0" required style="flex: 1; min-width: 120px; border-color: #a5b4fc;"><button class="btn" type="submit" style="flex: 1; min-width: 150px; background: #4f46e5;">⚡ Save Instant</button></form></div>'''
+ENTRY_FORM_HTML = '''<form action="/add_batch_unified" method="POST" class="no-print"><input type="hidden" name="source_page" value="{{ active_page }}"><div style="background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 20px;"><div class="flex-row" style="margin-bottom: 15px;"><div class="form-group flex-1" style="min-width: 140px; margin-bottom: 0;"><label>Date</label><input type="date" name="date" required></div><div class="form-group flex-1" style="min-width: 140px; margin-bottom: 0;"><label>Time</label><input type="time" name="time" required></div><div class="form-group flex-1" style="min-width: 150px; margin-bottom: 0;"><label>Payment Mode</label><select name="payment_mode" required><option value="Cash">💵 Cash</option><option value="Online">💳 Online</option></select></div></div><div class="flex-row"><div class="form-group flex-1" style="min-width: 200px; margin-bottom: 0;"><label>Transaction Nature</label><select name="txn_nature" id="txn_nature" onchange="toggleNature()" required style="border-color: var(--primary); font-weight: bold; font-size: 1.05em;"><option value="slip_in" style="color:var(--danger);">➖ Submit Slip / Bill (- Deduct from User Bal)</option><option value="advance" style="color:var(--primary);">📤 Give Advance Payment (+ Positive User Bal)</option><option value="receive_cash" style="color:var(--success);">📥 Receive Cash Settlement (- Deduct from User Bal)</option></select></div><div class="form-group flex-1" style="min-width: 250px; margin-bottom: 0; flex: 2;"><label id="primary_label" style="color: var(--primary);">Ledger Account</label><select name="primary_account" id="primary_account" onchange="checkNewAccount(this)" required style="border-color: var(--primary); font-weight: bold; background: white; font-size: 1.05em;"><option value="main" style="font-weight:bold;">🏢 Main Cash Book (Default)</option><optgroup label="👥 Person Ledgers">{% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}'s Account</option>{% endfor %}</optgroup><optgroup label="💸 Dasti Accounts">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}'s Dasti</option>{% endfor %}</optgroup><option value="new_dasti" style="color: #0ea5e9; font-weight: bold;">➕ Create New Dasti Account...</option><option value="new_person" style="color: var(--success); font-weight: bold;">➕ Create New Person Account...</option></select><input type="text" name="new_account_name" id="new_account_name" placeholder="Type New Name Here..." style="display:none; margin-top: 8px; border-color: var(--primary); width: 100%;"></div></div></div><div style="border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; background: #fff; overflow-x: auto;"><table style="width: 100%; min-width: 800px; margin: 0; background: transparent;"><thead style="background: #f1f5f9;"><tr><th style="width: 25%;">Category</th><th style="width: 50%;">Bill Detail / Description</th><th style="width: 20%;">Amount (₹)</th><th style="width: 5%; text-align: center;">Act</th></tr></thead><tbody id="entryBody"></tbody></table></div><div style="display: flex; gap: 15px; justify-content: space-between;"><button type="button" class="btn-outline" onclick="addRow('{% for c in categories %}<option value=\\\'{{c}}\\\'>{{c}}</option>{% endfor %}')" style="min-width: 200px; font-size: 1em;">+ Add Another Row</button><button class="btn-success" type="submit" style="min-width: 250px; font-size: 1.1em; padding: 12px;">💾 Save Batch Voucher</button></div></form><script>document.addEventListener("DOMContentLoaded", function() { initForm('{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}'); });</script>'''
+EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="max-width: 600px; margin: 0 auto;"><h2 style="color: var(--primary); margin-bottom: 20px;">✏️ Edit Transaction</h2><form action="/edit/{{ table_name }}/{{ entry.id }}" method="POST"><div class="flex-row"><div class="form-group flex-1"><label>Date</label><input type="date" name="date" value="{{ entry.date }}" required></div><div class="form-group flex-1"><label>Time</label><input type="time" name="time" value="{{ entry.time }}" required></div></div><div class="flex-row"><div class="form-group flex-1"><label>Mode</label><select name="payment_mode" required><option value="Cash" {% if entry.payment_mode == 'Cash' %}selected{% endif %}>Cash</option><option value="Online" {% if entry.payment_mode == 'Online' %}selected{% endif %}>Online</option></select></div><div class="form-group flex-1"><label>Category</label><input type="text" name="category" value="{{ entry.category }}" required></div></div><div class="form-group"><label>Description / Bill Details</label><input type="text" name="description" value="{{ entry.description }}" required></div>{% if session.get('role') in ['admin', 'superadmin'] and entry.status == 'approved' %}<div class="form-group"><label>Approved By <small>(Admin Override)</small></label><input type="text" name="approved_by" value="{{ entry.approved_by }}" style="border-color: var(--warning);"></div>{% endif %}<div class="flex-row"><div class="form-group flex-1"><label>Type</label><select name="type" required><option value="income" {% if entry.type == 'income' %}selected{% endif %}>➕ Main In</option><option value="expense" {% if entry.type == 'expense' %}selected{% endif %}>➖ Main Out</option><option value="dasti_out" {% if entry.type == 'dasti_out' %}selected{% endif %}>📤 Transfer (Main Out)</option><option value="batch_ledger_out" {% if entry.type == 'batch_ledger_out' %}selected{% endif %}>➖ Ledger Slip Out</option><option value="dasti_voucher_out" {% if entry.type == 'dasti_voucher_out' %}selected{% endif %}>💸 Dasti Voucher Out</option><option value="dasti_voucher_in" {% if entry.type == 'dasti_voucher_in' %}selected{% endif %}>💸 Dasti Settlement In</option><option value="settlement" {% if entry.type == 'settlement' %}selected{% endif %}>➖ Person Bill / Settlement</option><option value="advance" {% if entry.type == 'advance' %}selected{% endif %}>➕ Person Advance</option></select></div><div class="form-group flex-1"><label>Amount (₹)</label><input type="number" step="0.01" min="0" name="amount" value="{{ entry.amount }}" required></div></div><div style="display: flex; gap: 15px; margin-top: 20px;"><a href="javascript:history.back()" class="btn btn-outline" style="flex:1;">Cancel / Exit</a><button class="btn-success" type="submit" style="flex:1;">Save Changes</button></div></form></div></div></body></html>'''
+INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card no-print" style="padding: 20px; background: linear-gradient(to right, #ffffff, #f1f5f9);"><h3 style="margin-bottom: 15px; font-size: 1.2em; color: #475569;">📈 Account Flow Summary</h3><div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 0;"><div class="stat-card" style="padding: 15px;"><h4>Today</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_d_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_d_out) }}</div></div><div class="stat-card" style="padding: 15px;"><h4>Last 7 Days</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_w_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_w_out) }}</div></div><div class="stat-card" style="padding: 15px;"><h4>This Month</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_m_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_m_out) }}</div></div><div class="stat-card" style="padding: 15px;"><h4>This Year</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_y_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_y_out) }}</div></div></div></div>''' + EXPRESS_ENTRY_HTML + '''<div class="card balance-card"><h2 style="color: #64748b; font-size: 1.1em; text-transform: uppercase; margin-bottom: 0;">🏢 Available Main Cash Book Balance</h2><div class="balance-amount" style="color: {{ 'var(--success)' if balance >= 0 else 'var(--danger)' }}">₹{{ "{:,.2f}".format(balance) }}</div><div style="display: flex; justify-content: center; gap: 30px; margin-top: 15px; flex-wrap: wrap;"><div style="color: #0369a1; background: #e0f2fe; padding: 10px 15px; border-radius: 8px; border: 1px solid #bae6fd; min-width: 250px;"><strong style="font-size: 0.85em; color: #0284c7; text-transform: uppercase;">Person Ledger Advances (Outstanding)</strong><br><span style="font-size: 1.2em; font-weight: bold;">₹{{ "{:,.2f}".format(total_dasti) }}</span>{% if dasti_breakdown %}<div style="margin-top: 8px; font-size: 0.85em; color: #0369a1; text-align: left; border-top: 1px solid #bae6fd; padding-top: 8px;">{% for d in dasti_breakdown %}<div style="display: flex; justify-content: space-between; margin-bottom: 3px;"><span>👤 {{ d.name }}</span> <strong>₹{{ "{:,.2f}".format(d.amount) }}</strong></div>{% endfor %}</div>{% endif %}</div></div></div><div class="card no-print" style="padding: 25px;"><h3 style="margin-bottom: 15px; font-size: 1.3em;">⚡ Master Advanced Batch Entry</h3>''' + ENTRY_FORM_HTML + '''</div><div class="ledger-container"><div class="ledger-col"><h3 class="ledger-title" style="color: var(--success); border-bottom: 3px solid var(--success);">Receipts (+ IN)</h3><table style="width: 100%; font-size: 0.95em;"><tr><th style="width: 5%;">Sr.</th><th>Date</th><th>Mode/Cat</th><th>Detail</th><th style="text-align: right;">Amount</th><th class="no-print">Act</th></tr>{% for t in incomes %}<tr><td style="color: #64748b; font-weight: bold;">{{ loop.index }}</td><td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td><td><span class="badge badge-mode">{{ t.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span></td><td style="white-space: pre-wrap;">{{ t.description }}{% if t.status == 'approved' and t.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ t.approved_by }}</span>{% endif %}</td><td style="text-align: right;">{% if t.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}<span class="badge badge-in">+ ₹{{ "{:,.2f}".format(t.amount) }}</span></td><td style="text-align: center;" class="no-print"><a href="/edit/transactions/{{ t.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/transactions/{{ t.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td></tr>{% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No entries yet.</td></tr>{% endfor %}</table></div><div class="ledger-col"><h3 class="ledger-title" style="color: var(--danger); border-bottom: 3px solid var(--danger);">Payments (- OUT)</h3><table style="width: 100%; font-size: 0.95em;"><tr><th style="width: 5%;">Sr.</th><th>Date</th><th>Mode/Cat</th><th>Detail</th><th style="text-align: right;">Amount</th><th class="no-print">Act</th></tr>{% for t in expenses %}<tr><td style="color: #64748b; font-weight: bold;">{{ loop.index }}</td><td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td><td><span class="badge badge-mode">{{ t.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span></td><td style="white-space: pre-wrap;">{{ t.description }}{% if t.status == 'approved' and t.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ t.approved_by }}</span>{% endif %}</td><td style="text-align: right;">{% if t.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(t.amount) }}</span></td><td style="text-align: center;" class="no-print"><a href="/edit/transactions/{{ t.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/transactions/{{ t.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td></tr>{% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No entries yet.</td></tr>{% endfor %}</table></div></div></div></body></html>'''
+MAIN_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Ledger</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;"><h2 style="margin: 0; font-size: 1.6em;">🏢 Main Cash Book Complete Ledger</h2></div><div class="stats-grid"><div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Received (+ In)</h4><div class="value" style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in) }}</div></div><div class="stat-card" style="border-top: 4px solid var(--danger);"><h4>Total Payments & Advances (- Out)</h4><div class="value" style="color: var(--danger);">- ₹{{ "{:,.2f}".format(total_out) }}</div></div><div class="stat-card" style="border-top: 4px solid var(--primary); background: #f8fafc;"><h4>Available Balance</h4><div class="value">{% if balance >= 0 %}<span style="color: var(--success);">₹{{ "{:,.2f}".format(balance) }}</span>{% else %}<span style="color: var(--danger);">₹{{ "{:,.2f}".format(balance) }}</span>{% endif %}</div></div></div><div class="card" style="padding: 0; overflow-x: auto;"><h3 style="padding: 18px 25px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border);">Detailed Transaction History</h3><table style="width: 100%; min-width: 800px;"><thead><tr><th style="padding-left: 25px; width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 45%;">Bill No / Details & Link</th><th style="text-align: right; width: 15%;">Amount</th><th style="text-align: center; width: 10%;">Act</th></tr></thead><tbody>{% for txn in txns %}<tr><td style="padding-left: 25px;"><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td><td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td><td style="white-space: pre-wrap;">{{ txn.description }}{% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}</td><td style="text-align: right;">{% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}{% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out'] %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>({% if txn.type == 'dasti_out' %}Transfer Out{% elif txn.type == 'batch_ledger_out' %}Ledger Slip Out{% elif txn.type == 'dasti_voucher_out' %}Dasti Advance Out{% else %}Payment Out{% endif %})</small></span>{% else %}<span class="badge badge-in">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Receipt/In)</small></span>{% endif %}</td><td style="text-align: center;"><a href="/edit/transactions/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/transactions/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td></tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No entries found in Main Cash Book.</td></tr>{% endfor %}</tbody></table></div></div></body></html>'''
+PERSONS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Person Ledgers</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📊 Outstanding Balances & Person Ledgers</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; font-size: 1em;">Name</th><th style="text-align: right; font-size: 1em;">Net Status</th><th style="text-align: center; width: 220px; padding-right: 20px; font-size: 1em;">Action</th></tr>{% for b in balances %}<tr><td style="padding-left: 20px; font-weight: 500; font-size: 1.1em;">{{ b.name }}</td><td style="text-align: right;">{% if b.net > 0 %}<span class="badge badge-primary" style="font-size: 1em; padding: 6px 12px; background: #e0e7ff; color: #3730a3; border-radius: 8px;">+ ₹{{ "{:,.2f}".format(b.net) }} (Owes Firm)</span>{% elif b.net < 0 %}<span class="badge badge-success" style="font-size: 1em; padding: 6px 12px; background: #d1fae5; color: #065f46; border-radius: 8px;">- ₹{{ "{:,.2f}".format(b.net|abs) }} (Firm Owes)</span>{% else %}<span style="color: #9ca3af; font-weight: 600;">✓ Settled</span>{% endif %}</td><td style="text-align: center; padding-right: 20px;"><a href="/person_account/{{ b.id }}" class="btn btn-outline btn-sm">View</a><button onclick="let n=prompt('Edit Name:', '{{ b.name }}'); if(n) window.location='/edit_person/{{ b.id }}?name='+encodeURIComponent(n);" class="btn btn-sm" style="background:#f59e0b; color:white;">✏️</button></td></tr>{% else %}<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding: 40px;">No active profiles. Create one from the Dashboard Batch Entry!</td></tr>{% endfor %}</table></div></div></body></html>'''
+PERSON_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Account: {{ person.name }}</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;"><a href="/persons" class="btn-outline" style="text-decoration: none; padding: 8px 15px; border-radius: 8px; font-size: 0.9em;">← Back to Ledgers</a><h2 style="margin: 0; font-size: 1.6em;">Person Ledger: <span style="color: var(--primary);">{{ person.name }}</span></h2></div><div class="stats-grid"><div class="stat-card" style="border-top: 4px solid var(--primary);"><h4>Total Advances (Received from Main)</h4><div class="value" style="color: var(--primary);">+ ₹{{ "{:,.2f}".format(advances) }}</div></div><div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Slips / Settlements</h4><div class="value" style="color: var(--success);">- ₹{{ "{:,.2f}".format(settlements) }}</div></div><div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: var(--primary);">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %}<span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div></div><div class="card" style="padding: 0; overflow-x: auto;"><h3 style="padding: 18px 25px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border);">Detailed Transaction History</h3><table style="width: 100%; min-width: 800px;"><thead><tr><th style="padding-left: 25px; width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 45%;">Bill No / Details & Link</th><th style="text-align: right; width: 15%;">Amount</th><th style="text-align: center; width: 10%;">Act</th></tr></thead><tbody>{% for txn in txns %}<tr><td style="padding-left: 25px;"><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td><td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td><td style="white-space: pre-wrap;">{{ txn.description }}{% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}</td><td style="text-align: right;">{% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}{% if txn.type == 'advance' %}<span class="badge badge-in" style="background:#e0e7ff; color:#3730a3;">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Advance)</small></span>{% else %}<span class="badge badge-out" style="background:#d1fae5; color:#065f46;">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Slip / Settle)</small></span>{% endif %}</td><td style="text-align: center;"><a href="/edit/person_ledger/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/person_ledger/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td></tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No historical entries found for this person.</td></tr>{% endfor %}</tbody></table></div></div></body></html>'''
+DASTI_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Ledger</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card balance-card" style="margin-bottom: 25px;"><h2 style="color: #64748b; font-size: 1.1em; text-transform: uppercase; margin-bottom: 0;">🏢 Available Main Cash Book Balance</h2><div class="balance-amount" style="color: {{ 'var(--success)' if balance >= 0 else 'var(--danger)' }}">₹{{ "{:,.2f}".format(balance) }}</div><div style="display: flex; justify-content: center; margin-top: 15px;"><div style="color: #0369a1; background: #e0f2fe; padding: 10px 15px; border-radius: 8px; border: 1px solid #bae6fd; min-width: 250px;"><strong style="font-size: 0.85em; color: #0284c7; text-transform: uppercase;">💸 Total Dasti Balance (Outstanding)</strong><br><span style="font-size: 1.2em; font-weight: bold;">₹{{ "{:,.2f}".format(total_outstanding_dasti) }}</span></div></div></div><div class="card no-print" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📊 Outstanding Dasti Accounts</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; font-size: 1em;">Dasti Name</th><th style="text-align: right; font-size: 1em;">Net Status</th><th style="text-align: center; width: 220px; padding-right: 20px; font-size: 1em;">Action</th></tr>{% for b in balances %}<tr><td style="padding-left: 20px; font-weight: 500; font-size: 1.1em;">{{ b.name }}</td><td style="text-align: right;">{% if b.net > 0 %}<span class="badge badge-primary" style="font-size: 1em; padding: 6px 12px; background: #e0f2fe; color: #0369a1; border-radius: 8px;">+ ₹{{ "{:,.2f}".format(b.net) }} (Owes Firm)</span>{% elif b.net < 0 %}<span class="badge badge-success" style="font-size: 1em; padding: 6px 12px; background: #d1fae5; color: #065f46; border-radius: 8px;">- ₹{{ "{:,.2f}".format(b.net|abs) }} (Firm Owes)</span>{% else %}<span style="color: #9ca3af; font-weight: 600;">✓ Settled</span>{% endif %}</td><td style="text-align: center; padding-right: 20px;"><a href="/dasti_account/{{ b.id }}" class="btn btn-outline btn-sm">View</a><button onclick="let n=prompt('Edit Name:', '{{ b.name }}'); if(n) window.location='/edit_dasti_person/{{ b.id }}?name='+encodeURIComponent(n);" class="btn btn-sm" style="background:#f59e0b; color:white;">✏️</button></td></tr>{% else %}<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding: 40px;">No active Dasti accounts yet. Type a name in the Master Batch voucher to create one!</td></tr>{% endfor %}</table></div></div></body></html>'''
+DASTI_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Account: {{ person.name }}</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;"><a href="/dasti_ledger" class="btn-outline" style="text-decoration: none; padding: 8px 15px; border-radius: 8px; font-size: 0.9em;">← Back to Dasti Ledgers</a><h2 style="margin: 0; font-size: 1.6em;">Dasti Ledger: <span style="color: #0ea5e9;">{{ person.name }}</span></h2></div><div class="stats-grid"><div class="stat-card" style="border-top: 4px solid #0ea5e9;"><h4>Total Advances (Given Out)</h4><div class="value" style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(advances) }}</div></div><div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Slips / Settlements</h4><div class="value" style="color: var(--success);">- ₹{{ "{:,.2f}".format(settlements) }}</div></div><div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %}<span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div></div><div class="card" style="padding: 0; overflow-x: auto;"><h3 style="padding: 18px 25px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border);">Detailed Transaction History</h3><table style="width: 100%; min-width: 800px;"><thead><tr><th style="padding-left: 25px; width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 45%;">Dasti Detail & Link</th><th style="text-align: right; width: 15%;">Amount</th><th style="text-align: center; width: 10%;">Act</th></tr></thead><tbody>{% for txn in txns %}<tr><td style="padding-left: 25px;"><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td><td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td><td style="white-space: pre-wrap;">{{ txn.description }}{% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}</td><td style="text-align: right;">{% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}{% if txn.type == 'advance' %}<span class="badge badge-in" style="background:#e0f2fe; color:#0369a1;">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Advance Given)</small></span>{% else %}<span class="badge badge-out" style="background:#d1fae5; color:#065f46;">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Slip / Settle)</small></span>{% endif %}</td><td style="text-align: center;"><a href="/edit/dasti_ledger/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/dasti_ledger/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td></tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No historical entries found for this person.</td></tr>{% endfor %}</tbody></table></div></div></body></html>'''
 
-TRASH_TEMPLATE = '''<!DOCTYPE html><html><head><title>Trash / Recycle Bin</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card" style="padding: 0;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #fee2e2; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #991b1b;">🗑️ Deleted Vouchers & Entries (Trash)</h3>
-            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Category / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>
-                {% for t in trashed %}<tr>
-                    <td style="padding-left: 20px;"><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                    <td><span class="badge badge-mode">{{ t.category }}</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
-                    <td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td>
-                    <td style="text-align: center;">
-                        <a href="/restore_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Restore this transaction?');">♻️ Restore</a>
-                        <a href="/hard_delete_voucher/{{ t.link_id }}" class="btn btn-sm" style="background:#dc2626; color:white; margin-left:5px;" onclick="return confirm('Permanently delete? This cannot be undone.');">🔥 Delete Forever</a>
-                    </td>
-                </tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">Trash is empty.</td></tr>{% endfor %}
-            </table>
-        </div>
-    </div></body></html>'''
-
-REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dynamic Reports</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card no-print" style="padding: 25px; margin-bottom: 25px;">
-            <h3 style="margin-bottom: 15px; font-size: 1.3em;">📊 Generate Report</h3>
-            <form method="GET" action="/reports" style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end;">
-                <div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}"></div>
-                <div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" value="{{ end_date }}"></div>
-                <div class="form-group flex-1" style="min-width: 200px;"><label>Category Filter</label>
-                    <select name="category">
-                        <option value="">-- All Categories --</option>
-                        {% for c in categories %}<option value="{{ c }}" {% if category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
-                    </select>
-                </div>
-                <div class="form-group flex-1" style="min-width: 250px;"><label>Select Account / Ledger</label>
-                    <select name="report_account" style="font-weight:bold; color:var(--primary);">
-                        <option value="main" {% if report_account == 'main' %}selected{% endif %}>🏢 Main Cash Book</option>
-                        <optgroup label="👥 Person Ledgers">
-                            {% for p in persons %}<option value="person_{{ p.id }}" {% if report_account == 'person_'~p.id|string %}selected{% endif %}>👤 {{ p.name }}</option>{% endfor %}
-                        </optgroup>
-                        <optgroup label="💸 Dasti Ledgers">
-                            {% for d in dasti_persons %}<option value="dasti_{{ d.id }}" {% if report_account == 'dasti_'~d.id|string %}selected{% endif %}>💸 {{ d.name }}</option>{% endfor %}
-                        </optgroup>
-                    </select>
-                </div>
-                <button class="btn-success" type="submit" style="padding: 10px 25px; height: 45px;">Generate</button>
-            </form>
-        </div>
-
-        <div class="no-print" style="margin-bottom: 20px; display: flex; gap: 10px; justify-content: flex-end;">
-            <button onclick="window.print()" class="btn btn-outline" style="background: white;">🖨️ Print Report</button>
-            <a href="{{ url_for('export_reports', start_date=start_date, end_date=end_date, category=category, report_account=report_account) }}" class="btn btn-success" style="background: #10b981;">📥 Download Excel (CSV)</a>
-        </div>
-
-        <div class="stats-grid">
-            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Report Incomes / Received</h4><div class="value" style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--danger);"><h4>Report Expenses / Advances</h4><div class="value" style="color: var(--danger);">- ₹{{ "{:,.2f}".format(total_out) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--primary); background: #f8fafc;"><h4>Report Net Flow</h4><div class="value">{% if (total_in - total_out) >= 0 %}<span style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in - total_out) }}</span>{% else %}<span style="color: var(--danger);">- ₹{{ "{:,.2f}".format((total_in - total_out)|abs) }}</span>{% endif %}</div></div>
-        </div>
-
-        <div class="card" style="padding: 0; overflow-x: auto;">
-            <h3 style="padding: 18px 25px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border);">Report Results</h3>
-            <table style="width: 100%; min-width: 800px;">
-                <thead><tr><th style="padding-left: 25px; width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 50%;">Detail</th><th style="text-align: right; width: 20%;">Amount</th></tr></thead>
-                <tbody>
-                    {% for txn in results %}<tr>
-                        <td style="padding-left: 25px;"><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
-                        <td style="white-space: pre-wrap;">{{ txn.description }}
-                            {% if txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                        </td>
-                        <td style="text-align: right;">
-                            {% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'advance'] %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(txn.amount) }}</span>
-                            {% else %}<span class="badge badge-in">+ ₹{{ "{:,.2f}".format(txn.amount) }}</span>{% endif %}
-                        </td>
-                    </tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No records found for these filters.</td></tr>{% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div></body></html>'''
-
-USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card" style="margin-bottom: 20px; padding: 20px;">
-            <h3 style="font-size: 1.2em;">👤 Create New Firm User</h3>
-            <form action="/add_user" method="POST" style="display:flex; gap:15px; align-items: flex-end; flex-wrap:wrap;">
-                <div class="form-group flex-1"><label>Username</label><input type="text" name="new_username" required></div>
-                <div class="form-group flex-1"><label>Password</label><input type="password" name="new_password" required></div>
-                <div class="form-group flex-1"><label>Role</label>
-                    <select name="role" required><option value="admin">Admin</option><option value="superadmin">Superadmin</option><option value="cashier">Cashier</option><option value="market">Market</option></select></div>
-                <div class="form-group" style="padding-bottom: 10px;"><label><input type="checkbox" name="can_approve" value="1"> Grant Approval Rights</label></div>
-                <button class="btn-success" type="submit" style="padding: 10px 25px; height: 45px;">Create User</button>
-            </form>
-        </div>
-        <div class="card" style="padding: 0;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">🛡️ Registered Firm Users</h3>
-            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Username</th><th>Role</th><th>Approver</th><th style="text-align:center;">Action</th></tr>
-                {% for u in users %}<tr>
-                    <td style="padding-left: 20px; font-weight: 500;">{{ u.username }}</td>
-                    <td><span class="badge badge-mode">{{ u.role|title }}</span></td>
-                    <td>{% if u.can_approve %}<span class="badge badge-success" style="background:#d1fae5; color:#065f46;">Yes</span>{% else %}<span class="badge badge-danger" style="background:#fee2e2; color:#991b1b;">No</span>{% endif %}</td>
-                    <td style="text-align: center;"><a href="/edit_user/{{ u.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️ Edit User</a></td>
-                </tr>{% endfor %}
-            </table>
-        </div>
-    </div></body></html>'''
-
-EDIT_USER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit User</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card" style="max-width: 500px; margin: 0 auto;">
-            <h2 style="color: var(--primary); margin-bottom: 20px;">⚙️ Edit User Profile</h2>
-            <form action="/edit_user/{{ edit_user.id }}" method="POST">
-                <div class="form-group"><label>Username</label><input type="text" name="username" value="{{ edit_user.username }}" required></div>
-                <div class="form-group"><label>New Password <small>(Leave blank to keep current password)</small></label><input type="password" name="password"></div>
-                <div class="form-group"><label>User Role</label>
-                    <select name="role" required>
-                        <option value="superadmin" {% if edit_user.role == 'superadmin' %}selected{% endif %}>Superadmin</option>
-                        <option value="admin" {% if edit_user.role == 'admin' %}selected{% endif %}>Admin</option>
-                        <option value="cashier" {% if edit_user.role == 'cashier' %}selected{% endif %}>Cashier</option>
-                        <option value="market" {% if edit_user.role == 'market' %}selected{% endif %}>Market</option>
-                    </select>
-                </div>
-                <div class="form-group" style="padding-bottom: 15px; margin-top: 10px;">
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
-                        <input type="checkbox" name="can_approve" value="1" {% if edit_user.can_approve %}checked{% endif %} style="width: auto;"> Grant Voucher Approval Rights
-                    </label>
-                </div>
-                <div style="display: flex; gap: 15px;">
-                    <a href="/manage_users" class="btn btn-outline" style="flex:1;">Cancel</a>
-                    <button class="btn-success" type="submit" style="flex:1;">Save Updates</button>
-                </div>
-            </form>
-        </div>
-    </div></body></html>'''
-
-APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Pending Approvals</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card" style="padding: 0;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #fef08a; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #92400e;">⏳ Pending Advanced Vouchers</h3>
-            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Description / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>
-                {% for t in pending %}<tr>
-                    <td style="padding-left: 20px;"><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                    <td><span class="badge badge-pending">Pending</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
-                    <td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td>
-                    <td style="text-align: center;">
-                        <a href="/approve_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Approve this transaction?');">✅ Approve</a> 
-                        <a href="/reject_voucher/{{ t.link_id }}" class="btn btn-sm btn-danger" onclick="return confirm('Reject & Delete this transaction?');">❌ Reject</a>
-                    </td>
-                </tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No pending vouchers requiring approval.</td></tr>{% endfor %}
-            </table>
-        </div>
-    </div></body></html>'''
-
-EXPRESS_ENTRY_HTML = '''
-<div class="express-entry no-print">
-    <h3 style="margin-top: 0; color: #3730a3; font-size: 1.15em;">🚀 Express Direct Entry (Main Book)</h3>
-    <form action="/add_express" method="POST" style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-        <input type="hidden" name="date" id="express_date"><input type="hidden" name="time" id="express_time">
-        <input type="text" name="description" placeholder="Description / Reason" required style="flex: 3; min-width: 200px; border-color: #a5b4fc;">
-        <select name="type" required style="flex: 1; min-width: 150px; font-weight: bold; border-color: #a5b4fc;">
-            <option value="income">➕ Cash In</option>
-            <option value="expense">➖ Cash Out</option>
-        </select>
-        <input type="number" step="0.01" min="0" name="amount" placeholder="Amount (₹)" value="0" required style="flex: 1; min-width: 120px; border-color: #a5b4fc;">
-        <button class="btn" type="submit" style="flex: 1; min-width: 150px; background: #4f46e5;">⚡ Save Instant</button>
-    </form>
-</div>
-'''
-
-ENTRY_FORM_HTML = '''
-<form action="/add_batch_unified" method="POST" class="no-print">
-    <input type="hidden" name="source_page" value="{{ active_page }}">
-    <div style="background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 20px;">
-        <div class="flex-row" style="margin-bottom: 15px;">
-            <div class="form-group flex-1" style="min-width: 140px; margin-bottom: 0;"><label>Date</label><input type="date" name="date" required></div>
-            <div class="form-group flex-1" style="min-width: 140px; margin-bottom: 0;"><label>Time</label><input type="time" name="time" required></div>
-            <div class="form-group flex-1" style="min-width: 150px; margin-bottom: 0;"><label>Payment Mode</label><select name="payment_mode" required><option value="Cash">💵 Cash</option><option value="Online">💳 Online</option></select></div>
-        </div>
-        <div class="flex-row">
-            <div class="form-group flex-1" style="min-width: 200px; margin-bottom: 0;">
-                <label>Transaction Nature</label>
-                <select name="txn_nature" id="txn_nature" onchange="toggleNature()" required style="border-color: var(--primary); font-weight: bold; font-size: 1.05em;">
-                    <option value="slip_in" style="color:var(--danger);">➖ Submit Slip / Bill (- Deduct from User Bal)</option>
-                    <option value="advance" style="color:var(--primary);">📤 Give Advance Payment (+ Positive User Bal)</option>
-                    <option value="receive_cash" style="color:var(--success);">📥 Receive Cash Settlement (- Deduct from User Bal)</option>
-                </select>
-            </div>
-            <div class="form-group flex-1" style="min-width: 250px; margin-bottom: 0; flex: 2;">
-                <label id="primary_label" style="color: var(--primary);">Ledger Account</label>
-                <select name="primary_account" id="primary_account" onchange="checkNewAccount(this)" required style="border-color: var(--primary); font-weight: bold; background: white; font-size: 1.05em;">
-                    <option value="main" style="font-weight:bold;">🏢 Main Cash Book (Default)</option>
-                    <optgroup label="👥 Person Ledgers">
-                        {% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}'s Account</option>{% endfor %}
-                    </optgroup>
-                    <optgroup label="💸 Dasti Accounts">
-                        {% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}'s Dasti</option>{% endfor %}
-                    </optgroup>
-                    <option value="new_dasti" style="color: #0ea5e9; font-weight: bold;">➕ Create New Dasti Account...</option>
-                    <option value="new_person" style="color: var(--success); font-weight: bold;">➕ Create New Person Account...</option>
-                </select>
-                <input type="text" name="new_account_name" id="new_account_name" placeholder="Type New Name Here..." style="display:none; margin-top: 8px; border-color: var(--primary); width: 100%;">
-            </div>
-        </div>
-    </div>
-    <div style="border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; background: #fff; overflow-x: auto;">
-        <table style="width: 100%; min-width: 800px; margin: 0; background: transparent;">
-            <thead style="background: #f1f5f9;"><tr><th style="width: 25%;">Category</th><th style="width: 50%;">Bill Detail / Description</th><th style="width: 20%;">Amount (₹)</th><th style="width: 5%; text-align: center;">Act</th></tr></thead>
-            <tbody id="entryBody"></tbody>
-        </table>
-    </div>
-    <div style="display: flex; gap: 15px; justify-content: space-between;">
-        <button type="button" class="btn-outline" onclick="addRow('{% for c in categories %}<option value=\\\'{{c}}\\\'>{{c}}</option>{% endfor %}')" style="min-width: 200px; font-size: 1em;">+ Add Another Row</button>
-        <button class="btn-success" type="submit" style="min-width: 250px; font-size: 1.1em; padding: 12px;">💾 Save Batch Voucher</button>
-    </div>
-</form>
-<script>document.addEventListener("DOMContentLoaded", function() { initForm('{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}'); });</script>
-'''
-
-EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card" style="max-width: 600px; margin: 0 auto;">
-            <h2 style="color: var(--primary); margin-bottom: 20px;">✏️ Edit Transaction</h2>
-            <form action="/edit/{{ table_name }}/{{ entry.id }}" method="POST">
-                <div class="flex-row">
-                    <div class="form-group flex-1"><label>Date</label><input type="date" name="date" value="{{ entry.date }}" required></div>
-                    <div class="form-group flex-1"><label>Time</label><input type="time" name="time" value="{{ entry.time }}" required></div>
-                </div>
-                <div class="flex-row">
-                    <div class="form-group flex-1"><label>Mode</label>
-                        <select name="payment_mode" required><option value="Cash" {% if entry.payment_mode == 'Cash' %}selected{% endif %}>Cash</option><option value="Online" {% if entry.payment_mode == 'Online' %}selected{% endif %}>Online</option></select>
-                    </div>
-                    <div class="form-group flex-1"><label>Category</label><input type="text" name="category" value="{{ entry.category }}" required></div>
-                </div>
-                <div class="form-group"><label>Description / Bill Details</label><input type="text" name="description" value="{{ entry.description }}" required></div>
-                
-                {% if session.get('role') in ['admin', 'superadmin'] and entry.status == 'approved' %}
-                <div class="form-group">
-                    <label>Approved By <small>(Admin Override)</small></label>
-                    <input type="text" name="approved_by" value="{{ entry.approved_by }}" style="border-color: var(--warning);">
-                </div>
-                {% endif %}
-
-                <div class="flex-row">
-                    <div class="form-group flex-1"><label>Type</label>
-                        <select name="type" required>
-                            <option value="income" {% if entry.type == 'income' %}selected{% endif %}>➕ Main In</option><option value="expense" {% if entry.type == 'expense' %}selected{% endif %}>➖ Main Out</option>
-                            <option value="dasti_out" {% if entry.type == 'dasti_out' %}selected{% endif %}>📤 Transfer (Main Out)</option>
-                            <option value="batch_ledger_out" {% if entry.type == 'batch_ledger_out' %}selected{% endif %}>➖ Ledger Slip Out</option>
-                            <option value="dasti_voucher_out" {% if entry.type == 'dasti_voucher_out' %}selected{% endif %}>💸 Dasti Voucher Out</option>
-                            <option value="dasti_voucher_in" {% if entry.type == 'dasti_voucher_in' %}selected{% endif %}>💸 Dasti Settlement In</option>
-                            <option value="settlement" {% if entry.type == 'settlement' %}selected{% endif %}>➖ Person Bill / Settlement</option>
-                            <option value="advance" {% if entry.type == 'advance' %}selected{% endif %}>➕ Person Advance</option>
-                        </select>
-                    </div>
-                    <div class="form-group flex-1"><label>Amount (₹)</label><input type="number" step="0.01" min="0" name="amount" value="{{ entry.amount }}" required></div>
-                </div>
-                <div style="display: flex; gap: 15px; margin-top: 20px;">
-                    <a href="javascript:history.back()" class="btn btn-outline" style="flex:1;">Cancel / Exit</a>
-                    <button class="btn-success" type="submit" style="flex:1;">Save Changes</button>
-                </div>
-            </form>
-        </div>
-    </div></body></html>'''
-
-INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        
-        <div class="card no-print" style="padding: 20px; background: linear-gradient(to right, #ffffff, #f1f5f9);">
-            <h3 style="margin-bottom: 15px; font-size: 1.2em; color: #475569;">📈 Account Flow Summary</h3>
-            <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 0;">
-                <div class="stat-card" style="padding: 15px;"><h4>Today</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_d_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_d_out) }}</div></div>
-                <div class="stat-card" style="padding: 15px;"><h4>Last 7 Days</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_w_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_w_out) }}</div></div>
-                <div class="stat-card" style="padding: 15px;"><h4>This Month</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_m_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_m_out) }}</div></div>
-                <div class="stat-card" style="padding: 15px;"><h4>This Year</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_y_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_y_out) }}</div></div>
-            </div>
-        </div>
-
-        ''' + EXPRESS_ENTRY_HTML + '''
-        
-        <div class="card balance-card">
-            <h2 style="color: #64748b; font-size: 1.1em; text-transform: uppercase; margin-bottom: 0;">🏢 Available Main Cash Book Balance</h2>
-            <div class="balance-amount" style="color: {{ 'var(--success)' if balance >= 0 else 'var(--danger)' }}">₹{{ "{:,.2f}".format(balance) }}</div>
-            
-            <div style="display: flex; justify-content: center; gap: 30px; margin-top: 15px; flex-wrap: wrap;">
-                <div style="color: #0369a1; background: #e0f2fe; padding: 10px 15px; border-radius: 8px; border: 1px solid #bae6fd; min-width: 250px;">
-                    <strong style="font-size: 0.85em; color: #0284c7; text-transform: uppercase;">Person Ledger Advances (Outstanding)</strong><br>
-                    <span style="font-size: 1.2em; font-weight: bold;">₹{{ "{:,.2f}".format(total_dasti) }}</span>
-                    {% if dasti_breakdown %}
-                    <div style="margin-top: 8px; font-size: 0.85em; color: #0369a1; text-align: left; border-top: 1px solid #bae6fd; padding-top: 8px;">
-                        {% for d in dasti_breakdown %}
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
-                            <span>👤 {{ d.name }}</span> <strong>₹{{ "{:,.2f}".format(d.amount) }}</strong>
-                        </div>
-                        {% endfor %}
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-        
-        <div class="card no-print" style="padding: 25px;"><h3 style="margin-bottom: 15px; font-size: 1.3em;">⚡ Master Advanced Batch Entry</h3>''' + ENTRY_FORM_HTML + '''</div>
-        
-        <div class="ledger-container">
-            <div class="ledger-col"><h3 class="ledger-title" style="color: var(--success); border-bottom: 3px solid var(--success);">Receipts (+ IN)</h3>
-                <table style="width: 100%; font-size: 0.95em;"><tr><th style="width: 5%;">Sr.</th><th>Date</th><th>Mode/Cat</th><th>Detail</th><th style="text-align: right;">Amount</th><th class="no-print">Act</th></tr>
-                    {% for t in incomes %}<tr>
-                        <td style="color: #64748b; font-weight: bold;">{{ loop.index }}</td>
-                        <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ t.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span></td>
-                        <td style="white-space: pre-wrap;">{{ t.description }}
-                            {% if t.status == 'approved' and t.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ t.approved_by }}</span>{% endif %}
-                        </td>
-                        <td style="text-align: right;">
-                            {% if t.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
-                            <span class="badge badge-in">+ ₹{{ "{:,.2f}".format(t.amount) }}</span>
-                        </td>
-                        <td style="text-align: center;" class="no-print"><a href="/edit/transactions/{{ t.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/transactions/{{ t.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
-                    </tr>{% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No entries yet.</td></tr>{% endfor %}
-                </table>
-            </div>
-            <div class="ledger-col"><h3 class="ledger-title" style="color: var(--danger); border-bottom: 3px solid var(--danger);">Payments (- OUT)</h3>
-                <table style="width: 100%; font-size: 0.95em;"><tr><th style="width: 5%;">Sr.</th><th>Date</th><th>Mode/Cat</th><th>Detail</th><th style="text-align: right;">Amount</th><th class="no-print">Act</th></tr>
-                    {% for t in expenses %}<tr>
-                        <td style="color: #64748b; font-weight: bold;">{{ loop.index }}</td>
-                        <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ t.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span></td>
-                        <td style="white-space: pre-wrap;">{{ t.description }}
-                            {% if t.status == 'approved' and t.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ t.approved_by }}</span>{% endif %}
-                        </td>
-                        <td style="text-align: right;">
-                            {% if t.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
-                            <span class="badge badge-out">- ₹{{ "{:,.2f}".format(t.amount) }}</span>
-                        </td>
-                        <td style="text-align: center;" class="no-print"><a href="/edit/transactions/{{ t.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/transactions/{{ t.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
-                    </tr>{% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No entries yet.</td></tr>{% endfor %}
-                </table>
-            </div>
-        </div>
-    </div></body></html>'''
-
-MAIN_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Ledger</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h2 style="margin: 0; font-size: 1.6em;">🏢 Main Cash Book Complete Ledger</h2>
-        </div>
-        <div class="stats-grid">
-            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Received (+ In)</h4><div class="value" style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--danger);"><h4>Total Payments & Advances (- Out)</h4><div class="value" style="color: var(--danger);">- ₹{{ "{:,.2f}".format(total_out + total_dasti + total_dasti_vouchers) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--primary); background: #f8fafc;"><h4>Available Balance</h4><div class="value">
-                {% if balance >= 0 %}<span style="color: var(--success);">₹{{ "{:,.2f}".format(balance) }}</span>
-                {% else %}<span style="color: var(--danger);">₹{{ "{:,.2f}".format(balance) }}</span>{% endif %}
-            </div></div>
-        </div>
-        <div class="card" style="padding: 0; overflow-x: auto;">
-            <h3 style="padding: 18px 25px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border);">Detailed Transaction History</h3>
-            <table style="width: 100%; min-width: 800px;">
-                <thead><tr><th style="padding-left: 25px; width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 45%;">Bill No / Details & Link</th><th style="text-align: right; width: 15%;">Amount</th><th style="text-align: center; width: 10%;">Act</th></tr></thead>
-                <tbody>
-                    {% for txn in txns %}<tr>
-                        <td style="padding-left: 25px;"><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
-                        <td style="white-space: pre-wrap;">{{ txn.description }}
-                            {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                        </td>
-                        <td style="text-align: right;">
-                            {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
-                            {% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out'] %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>({% if txn.type == 'dasti_out' %}Transfer Out{% elif txn.type == 'batch_ledger_out' %}Ledger Slip Out{% elif txn.type == 'dasti_voucher_out' %}Dasti Advance Out{% else %}Payment Out{% endif %})</small></span>
-                            {% else %}<span class="badge badge-in">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Receipt/In)</small></span>{% endif %}
-                        </td>
-                        <td style="text-align: center;"><a href="/edit/transactions/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/transactions/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
-                    </tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No entries found in Main Cash Book.</td></tr>{% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div></body></html>'''
-
-PERSONS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Person Ledgers</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card" style="padding: 0;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📊 Outstanding Balances & Person Ledgers</h3>
-            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; font-size: 1em;">Name</th><th style="text-align: right; font-size: 1em;">Net Status</th><th style="text-align: center; width: 220px; padding-right: 20px; font-size: 1em;">Action</th></tr>
-                {% for b in balances %}<tr>
-                    <td style="padding-left: 20px; font-weight: 500; font-size: 1.1em;">{{ b.name }}</td>
-                    <td style="text-align: right;">{% if b.net > 0 %}<span class="badge badge-primary" style="font-size: 1em; padding: 6px 12px; background: #e0e7ff; color: #3730a3; border-radius: 8px;">+ ₹{{ "{:,.2f}".format(b.net) }} (Owes Firm)</span>{% elif b.net < 0 %}<span class="badge badge-success" style="font-size: 1em; padding: 6px 12px; background: #d1fae5; color: #065f46; border-radius: 8px;">- ₹{{ "{:,.2f}".format(b.net|abs) }} (Firm Owes)</span>{% else %}<span style="color: #9ca3af; font-weight: 600;">✓ Settled</span>{% endif %}</td>
-                    <td style="text-align: center; padding-right: 20px;">
-                        <a href="/person_account/{{ b.id }}" class="btn btn-outline btn-sm">View</a>
-                        <button onclick="let n=prompt('Edit Name:', '{{ b.name }}'); if(n) window.location='/edit_person/{{ b.id }}?name='+encodeURIComponent(n);" class="btn btn-sm" style="background:#f59e0b; color:white;">✏️</button>
-                    </td>
-                </tr>{% else %}<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding: 40px;">No active profiles. Create one from the Dashboard Batch Entry!</td></tr>{% endfor %}
-            </table>
-        </div>
-    </div></body></html>'''
-
-PERSON_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Account: {{ person.name }}</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;"><a href="/persons" class="btn-outline" style="text-decoration: none; padding: 8px 15px; border-radius: 8px; font-size: 0.9em;">← Back to Ledgers</a><h2 style="margin: 0; font-size: 1.6em;">Person Ledger: <span style="color: var(--primary);">{{ person.name }}</span></h2></div>
-        <div class="stats-grid">
-            <div class="stat-card" style="border-top: 4px solid var(--primary);"><h4>Total Advances (Received from Main)</h4><div class="value" style="color: var(--primary);">+ ₹{{ "{:,.2f}".format(advances) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Slips / Settlements</h4><div class="value" style="color: var(--success);">- ₹{{ "{:,.2f}".format(settlements) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: var(--primary);">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %}<span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div>
-        </div>
-        <div class="card" style="padding: 0; overflow-x: auto;">
-            <h3 style="padding: 18px 25px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border);">Detailed Transaction History</h3>
-            <table style="width: 100%; min-width: 800px;">
-                <thead><tr><th style="padding-left: 25px; width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 45%;">Bill No / Details & Link</th><th style="text-align: right; width: 15%;">Amount</th><th style="text-align: center; width: 10%;">Act</th></tr></thead>
-                <tbody>
-                    {% for txn in txns %}<tr>
-                        <td style="padding-left: 25px;"><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
-                        <td style="white-space: pre-wrap;">{{ txn.description }}
-                            {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                        </td>
-                        <td style="text-align: right;">
-                            {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
-                            {% if txn.type == 'advance' %}<span class="badge badge-in" style="background:#e0e7ff; color:#3730a3;">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Advance)</small></span>
-                            {% else %}<span class="badge badge-out" style="background:#d1fae5; color:#065f46;">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Slip / Settle)</small></span>{% endif %}
-                        </td>
-                        <td style="text-align: center;"><a href="/edit/person_ledger/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/person_ledger/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
-                    </tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No historical entries found for this person.</td></tr>{% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div></body></html>'''
-
-DASTI_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Ledger</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        
-        <div class="card balance-card" style="margin-bottom: 25px;">
-            <h2 style="color: #64748b; font-size: 1.1em; text-transform: uppercase; margin-bottom: 0;">🏢 Available Main Cash Book Balance</h2>
-            <div class="balance-amount" style="color: {{ 'var(--success)' if balance >= 0 else 'var(--danger)' }}">₹{{ "{:,.2f}".format(balance) }}</div>
-            
-            <div style="display: flex; justify-content: center; margin-top: 15px;">
-                <div style="color: #0369a1; background: #e0f2fe; padding: 10px 15px; border-radius: 8px; border: 1px solid #bae6fd; min-width: 250px;">
-                    <strong style="font-size: 0.85em; color: #0284c7; text-transform: uppercase;">💸 Total Dasti Balance (Outstanding)</strong><br>
-                    <span style="font-size: 1.2em; font-weight: bold;">₹{{ "{:,.2f}".format(total_outstanding_dasti) }}</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="card no-print" style="padding: 0;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📊 Outstanding Dasti Accounts</h3>
-            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; font-size: 1em;">Dasti Name</th><th style="text-align: right; font-size: 1em;">Net Status</th><th style="text-align: center; width: 220px; padding-right: 20px; font-size: 1em;">Action</th></tr>
-                {% for b in balances %}<tr>
-                    <td style="padding-left: 20px; font-weight: 500; font-size: 1.1em;">{{ b.name }}</td>
-                    <td style="text-align: right;">{% if b.net > 0 %}<span class="badge badge-primary" style="font-size: 1em; padding: 6px 12px; background: #e0f2fe; color: #0369a1; border-radius: 8px;">+ ₹{{ "{:,.2f}".format(b.net) }} (Owes Firm)</span>{% elif b.net < 0 %}<span class="badge badge-success" style="font-size: 1em; padding: 6px 12px; background: #d1fae5; color: #065f46; border-radius: 8px;">- ₹{{ "{:,.2f}".format(b.net|abs) }} (Firm Owes)</span>{% else %}<span style="color: #9ca3af; font-weight: 600;">✓ Settled</span>{% endif %}</td>
-                    <td style="text-align: center; padding-right: 20px;">
-                        <a href="/dasti_account/{{ b.id }}" class="btn btn-outline btn-sm">View</a>
-                        <button onclick="let n=prompt('Edit Name:', '{{ b.name }}'); if(n) window.location='/edit_dasti_person/{{ b.id }}?name='+encodeURIComponent(n);" class="btn btn-sm" style="background:#f59e0b; color:white;">✏️</button>
-                    </td>
-                </tr>{% else %}<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding: 40px;">No active Dasti accounts yet. Type a name in the Master Batch voucher to create one!</td></tr>{% endfor %}
-            </table>
-        </div>
-    </div></body></html>'''
-
-DASTI_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Account: {{ person.name }}</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;"><a href="/dasti_ledger" class="btn-outline" style="text-decoration: none; padding: 8px 15px; border-radius: 8px; font-size: 0.9em;">← Back to Dasti Ledgers</a><h2 style="margin: 0; font-size: 1.6em;">Dasti Ledger: <span style="color: #0ea5e9;">{{ person.name }}</span></h2></div>
-        <div class="stats-grid">
-            <div class="stat-card" style="border-top: 4px solid #0ea5e9;"><h4>Total Advances (Given Out)</h4><div class="value" style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(advances) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Slips / Settlements</h4><div class="value" style="color: var(--success);">- ₹{{ "{:,.2f}".format(settlements) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %}<span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div>
-        </div>
-        <div class="card" style="padding: 0; overflow-x: auto;">
-            <h3 style="padding: 18px 25px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border);">Detailed Transaction History</h3>
-            <table style="width: 100%; min-width: 800px;">
-                <thead><tr><th style="padding-left: 25px; width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 45%;">Dasti Detail & Link</th><th style="text-align: right; width: 15%;">Amount</th><th style="text-align: center; width: 10%;">Act</th></tr></thead>
-                <tbody>
-                    {% for txn in txns %}<tr>
-                        <td style="padding-left: 25px;"><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
-                        <td style="white-space: pre-wrap;">{{ txn.description }}
-                            {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                        </td>
-                        <td style="text-align: right;">
-                            {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
-                            {% if txn.type == 'advance' %}<span class="badge badge-in" style="background:#e0f2fe; color:#0369a1;">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Advance Given)</small></span>
-                            {% else %}<span class="badge badge-out" style="background:#d1fae5; color:#065f46;">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Slip / Settle)</small></span>{% endif %}
-                        </td>
-                        <td style="text-align: center;"><a href="/edit/dasti_ledger/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/dasti_ledger/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
-                    </tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No historical entries found for this person.</td></tr>{% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div></body></html>'''
-
-# --- DATABASE LOGIC ---
-
-def init_db():
-    conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT, firm_name TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS persons (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, name TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS dasti_persons (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, name TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, date TEXT, time TEXT, payment_mode TEXT, category TEXT, description TEXT, type TEXT, amount REAL, link_id TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS person_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, person_id INTEGER, date TEXT, time TEXT, payment_mode TEXT, category TEXT, description TEXT, type TEXT, amount REAL, link_id TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS dasti_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, dasti_person_id INTEGER, date TEXT, time TEXT, payment_mode TEXT, category TEXT, description TEXT, type TEXT, amount REAL, link_id TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, firm_id INTEGER, name TEXT UNIQUE)''')
-    
-    try: c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'superadmin'")
-    except: pass
-    try: c.execute("ALTER TABLE users ADD COLUMN firm_id INTEGER")
-    except: pass
-    try: c.execute("ALTER TABLE users ADD COLUMN can_approve INTEGER DEFAULT 1")
-    except: pass
-    
-    for table in ['transactions', 'person_ledger', 'dasti_ledger']:
-        for col, default in [('time', "'00:00'"), ('payment_mode', "'Cash'"), ('category', "'General'"), ('link_id', "''"), ('status', "'approved'"), ('approved_by', "''"), ('deleted', "0")]:
-            try: c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT {default}")
-            except sqlite3.OperationalError: pass
-            
-    c.execute("UPDATE users SET firm_id = id WHERE firm_id IS NULL")
-    conn.commit(); conn.close()
+# --- FIREBASE HELPER LOGIC ---
 
 def has_users():
-    conn = sqlite3.connect('cashbook.db'); c = conn.cursor(); c.execute("SELECT COUNT(*) FROM users")
-    count = c.fetchone()[0]; conn.close()
-    return count > 0
+    docs = db.collection('users').limit(1).stream()
+    return any(True for _ in docs)
 
 def get_categories(firm_id):
-    conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-    custom = [r[0] for r in c.execute("SELECT name FROM categories WHERE firm_id=?", (firm_id,)).fetchall()]
-    conn.close()
+    docs = db.collection('categories').where('firm_id', '==', firm_id).stream()
+    custom = [doc.to_dict().get('name') for doc in docs]
     return ['General', 'Sales', 'Purchase', 'Salary', 'Transport'] + custom
 
 # --- ROUTES ---
@@ -716,20 +202,27 @@ def get_categories(firm_id):
 def index():
     if not has_users(): return redirect(url_for('register'))
     if 'user_id' not in session: return redirect(url_for('login'))
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor(); firm_id = session['firm_id']
-    persons = c.execute("SELECT * FROM persons WHERE user_id = ? ORDER BY name ASC", (firm_id,)).fetchall()
-    dasti_persons = c.execute("SELECT * FROM dasti_persons WHERE user_id = ? ORDER BY name ASC", (firm_id,)).fetchall()
+    firm_id = session['firm_id']
     
-    incomes = c.execute("SELECT * FROM transactions WHERE user_id = ? AND type='income' AND deleted=0 ORDER BY date DESC, time DESC, id DESC", (firm_id,)).fetchall()
-    expenses = c.execute("SELECT * FROM transactions WHERE user_id = ? AND type IN ('expense', 'batch_ledger_out') AND deleted=0 ORDER BY date ASC, time ASC, id ASC", (firm_id,)).fetchall()
+    persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('persons').where('user_id', '==', firm_id).stream()]
+    persons.sort(key=lambda x: x.get('name', ''))
     
-    total_in_actual = c.execute("SELECT SUM(amount) FROM transactions WHERE user_id = ? AND type IN ('income', 'dasti_voucher_in') AND status='approved' AND deleted=0", (firm_id,)).fetchone()[0] or 0.0
+    dasti_persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('dasti_persons').where('user_id', '==', firm_id).stream()]
+    dasti_persons.sort(key=lambda x: x.get('name', ''))
     
-    # CRITICAL MATH FIX: We only subtract physical cash out (expense, dasti_out, dasti_voucher_out). 
-    # 'batch_ledger_out' (Slips) are ignored here so we don't double-deduct the firm's balance!
-    total_out_actual = c.execute("SELECT SUM(amount) FROM transactions WHERE user_id = ? AND type IN ('expense', 'dasti_out', 'dasti_voucher_out') AND status='approved' AND deleted=0", (firm_id,)).fetchone()[0] or 0.0
+    all_txns = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     
-    summary_txns = c.execute("SELECT date, type, amount FROM transactions WHERE user_id=? AND deleted=0 AND status='approved'", (firm_id,)).fetchall()
+    incomes = [t for t in all_txns if t.get('type') == 'income']
+    expenses = [t for t in all_txns if t.get('type') in ('expense', 'batch_ledger_out')]
+    
+    incomes.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
+    expenses.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0))) # Serial Order Fix
+    
+    # MATH FIX: Only subtract actual physical cash out to prevent double-deduction on slips
+    total_in_actual = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in') and t.get('status') == 'approved')
+    total_out_actual = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out') and t.get('status') == 'approved')
+    
+    summary_txns = [t for t in all_txns if t.get('status') == 'approved']
     now = datetime.now()
     today_str = now.strftime('%Y-%m-%d')
     month_str = now.strftime('%Y-%m')
@@ -738,9 +231,9 @@ def index():
     
     s_d_in = s_d_out = s_w_in = s_w_out = s_m_in = s_m_out = s_y_in = s_y_out = 0
     for r in summary_txns:
-        amt, d, ttype = r['amount'], r['date'], r['type']
+        amt, d, ttype = float(r.get('amount', 0)), r.get('date', ''), r.get('type', '')
         is_in = ttype in ('income', 'dasti_voucher_in')
-        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out')
+        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out') # Math Fix
         
         if d.startswith(year_str):
             if is_in: s_y_in += amt 
@@ -754,238 +247,267 @@ def index():
         if d == today_str:
             if is_in: s_d_in += amt 
             elif is_out: s_d_out += amt
+
+    all_person_ledger = [doc.to_dict() for doc in db.collection('person_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     
     total_dasti_ledger = 0.0
     dasti_breakdown = []
     for p in persons:
-        adv = c.execute("SELECT SUM(amount) FROM person_ledger WHERE user_id = ? AND person_id = ? AND type='advance' AND status='approved' AND deleted=0", (firm_id, p['id'])).fetchone()[0] or 0.0
-        setl = c.execute("SELECT SUM(amount) FROM person_ledger WHERE user_id = ? AND person_id = ? AND type='settlement' AND status='approved' AND deleted=0", (firm_id, p['id'])).fetchone()[0] or 0.0
+        adv = sum(float(l.get('amount', 0)) for l in all_person_ledger if l.get('person_id') == p['id'] and l.get('type') == 'advance' and l.get('status') == 'approved')
+        setl = sum(float(l.get('amount', 0)) for l in all_person_ledger if l.get('person_id') == p['id'] and l.get('type') == 'settlement' and l.get('status') == 'approved')
         owed = adv - setl
         if owed > 0:
             total_dasti_ledger += owed
             dasti_breakdown.append({'name': p['name'], 'amount': owed})
-    
-    conn.close()
+            
     balance = total_in_actual - total_out_actual
     cats = get_categories(firm_id)
+    
     return render_template_string(INDEX_TEMPLATE, persons=persons, dasti_persons=dasti_persons, incomes=incomes, expenses=expenses, balance=balance, total_dasti=total_dasti_ledger, dasti_breakdown=dasti_breakdown, categories=cats, s_d_in=s_d_in, s_d_out=s_d_out, s_w_in=s_w_in, s_w_out=s_w_out, s_m_in=s_m_in, s_m_out=s_m_out, s_y_in=s_y_in, s_y_out=s_y_out, username=session['username'], active_page='home')
 
 @app.route('/main_ledger')
 def main_ledger():
     if 'user_id' not in session: return redirect(url_for('login'))
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor(); firm_id = session['firm_id']
+    firm_id = session['firm_id']
     
-    txns = c.execute("SELECT * FROM transactions WHERE user_id = ? AND deleted=0 ORDER BY date DESC, time DESC, id DESC", (firm_id,)).fetchall()
-    total_in = c.execute("SELECT SUM(amount) FROM transactions WHERE user_id = ? AND type IN ('income', 'dasti_voucher_in') AND status='approved' AND deleted=0", (firm_id,)).fetchone()[0] or 0.0
-    total_out = c.execute("SELECT SUM(amount) FROM transactions WHERE user_id = ? AND type='expense' AND status='approved' AND deleted=0", (firm_id,)).fetchone()[0] or 0.0
-    total_dasti = c.execute("SELECT SUM(amount) FROM transactions WHERE user_id = ? AND type='dasti_out' AND status='approved' AND deleted=0", (firm_id,)).fetchone()[0] or 0.0
-    total_dasti_vouchers = c.execute("SELECT SUM(amount) FROM transactions WHERE user_id = ? AND type='dasti_voucher_out' AND status='approved' AND deleted=0", (firm_id,)).fetchone()[0] or 0.0
+    all_txns = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
+    all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
     
-    conn.close()
+    total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in') and t.get('status') == 'approved')
+    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') == 'expense' and t.get('status') == 'approved')
+    total_dasti = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') == 'dasti_out' and t.get('status') == 'approved')
+    total_dasti_vouchers = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') == 'dasti_voucher_out' and t.get('status') == 'approved')
+    
     balance = total_in - (total_out + total_dasti + total_dasti_vouchers)
-    return render_template_string(MAIN_LEDGER_TEMPLATE, txns=txns, balance=balance, total_in=total_in, total_out=total_out, total_dasti=total_dasti, total_dasti_vouchers=total_dasti_vouchers, username=session['username'], active_page='main_ledger')
+    return render_template_string(MAIN_LEDGER_TEMPLATE, txns=all_txns, balance=balance, total_in=total_in, total_out=total_out, total_dasti=total_dasti, total_dasti_vouchers=total_dasti_vouchers, username=session['username'], active_page='main_ledger')
 
 @app.route('/dasti_ledger')
 def dasti_ledger():
     if 'user_id' not in session: return redirect(url_for('login'))
     firm_id = session['firm_id']
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
     
-    total_in = c.execute("SELECT SUM(amount) FROM transactions WHERE user_id = ? AND type IN ('income', 'dasti_voucher_in') AND status='approved' AND deleted=0", (firm_id,)).fetchone()[0] or 0.0
-    total_out = c.execute("SELECT SUM(amount) FROM transactions WHERE user_id = ? AND type IN ('expense', 'dasti_out', 'dasti_voucher_out') AND status='approved' AND deleted=0", (firm_id,)).fetchone()[0] or 0.0
+    all_txns = [doc.to_dict() for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
+    total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in') and t.get('status') == 'approved')
+    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out') and t.get('status') == 'approved')
     main_balance = total_in - total_out
 
-    dasti_persons = c.execute("SELECT * FROM dasti_persons WHERE user_id = ? ORDER BY name ASC", (firm_id,)).fetchall()
+    dasti_persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('dasti_persons').where('user_id', '==', firm_id).stream()]
+    dasti_persons.sort(key=lambda x: x.get('name', ''))
+    
+    all_dasti_ledger = [doc.to_dict() for doc in db.collection('dasti_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
+    
     balances = []
     total_outstanding_dasti = 0.0
     
     for p in dasti_persons:
-        adv = c.execute("SELECT SUM(amount) FROM dasti_ledger WHERE user_id = ? AND dasti_person_id = ? AND type='advance' AND status='approved' AND deleted=0", (firm_id, p['id'])).fetchone()[0] or 0.0
-        setl = c.execute("SELECT SUM(amount) FROM dasti_ledger WHERE user_id = ? AND dasti_person_id = ? AND type='settlement' AND status='approved' AND deleted=0", (firm_id, p['id'])).fetchone()[0] or 0.0
+        adv = sum(float(l.get('amount', 0)) for l in all_dasti_ledger if l.get('dasti_person_id') == p['id'] and l.get('type') == 'advance' and l.get('status') == 'approved')
+        setl = sum(float(l.get('amount', 0)) for l in all_dasti_ledger if l.get('dasti_person_id') == p['id'] and l.get('type') == 'settlement' and l.get('status') == 'approved')
         net = adv - setl
         balances.append({'id': p['id'], 'name': p['name'], 'net': net})
         if net > 0:
             total_outstanding_dasti += net
-    
-    conn.close()
+            
     return render_template_string(DASTI_LEDGER_TEMPLATE, balances=balances, balance=main_balance, total_outstanding_dasti=total_outstanding_dasti, username=session['username'], active_page='dasti_ledger')
 
-@app.route('/dasti_account/<int:person_id>')
+@app.route('/dasti_account/<string:person_id>')
 def dasti_account(person_id):
     if 'user_id' not in session: return redirect(url_for('login'))
     firm_id = session['firm_id']
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
-    person = c.execute("SELECT * FROM dasti_persons WHERE id = ? AND user_id = ?", (person_id, firm_id)).fetchone()
-    if not person: conn.close(); return redirect(url_for('dasti_ledger'))
     
-    txns = c.execute("SELECT * FROM dasti_ledger WHERE dasti_person_id = ? AND user_id = ? AND deleted=0 ORDER BY date DESC, time DESC, id DESC", (person_id, firm_id)).fetchall()
-    advances = c.execute("SELECT SUM(amount) FROM dasti_ledger WHERE dasti_person_id = ? AND user_id = ? AND type='advance' AND status='approved' AND deleted=0", (person_id, firm_id)).fetchone()[0] or 0.0
-    settlements = c.execute("SELECT SUM(amount) FROM dasti_ledger WHERE dasti_person_id = ? AND user_id = ? AND type='settlement' AND status='approved' AND deleted=0", (person_id, firm_id)).fetchone()[0] or 0.0
-    conn.close()
+    person_doc = db.collection('dasti_persons').document(person_id).get()
+    if not person_doc.exists or person_doc.to_dict().get('user_id') != firm_id: return redirect(url_for('dasti_ledger'))
+    person = {'id': person_doc.id, **person_doc.to_dict()}
+    
+    txns = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('dasti_ledger').where('dasti_person_id', '==', person_id).where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
+    txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
+    
+    advances = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'advance' and t.get('status') == 'approved')
+    settlements = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'settlement' and t.get('status') == 'approved')
+    
     return render_template_string(DASTI_ACCOUNT_TEMPLATE, person=person, txns=txns, balance=(advances - settlements), advances=advances, settlements=settlements, username=session['username'], active_page='dasti_ledger')
 
-@app.route('/edit_dasti_person/<int:id>')
+@app.route('/edit_dasti_person/<string:id>')
 def edit_dasti_person(id):
     if 'user_id' not in session: return redirect(url_for('login'))
     new_name = request.args.get('name')
     if new_name:
-        conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-        c.execute("UPDATE dasti_persons SET name=? WHERE id=? AND user_id=?", (new_name, id, session['firm_id']))
-        conn.commit(); conn.close()
+        doc_ref = db.collection('dasti_persons').document(id)
+        if doc_ref.get().to_dict().get('user_id') == session['firm_id']:
+            doc_ref.update({'name': new_name})
     return redirect(url_for('dasti_ledger'))
 
 @app.route('/persons')
 def persons():
     if 'user_id' not in session: return redirect(url_for('login'))
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor(); firm_id = session['firm_id']
-    person_list = c.execute("SELECT * FROM persons WHERE user_id = ? ORDER BY name ASC", (firm_id,)).fetchall()
+    firm_id = session['firm_id']
+    
+    person_list = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('persons').where('user_id', '==', firm_id).stream()]
+    person_list.sort(key=lambda x: x.get('name', ''))
+    
+    all_person_ledger = [doc.to_dict() for doc in db.collection('person_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
+    
     balances = []
     for p in person_list:
-        advances = c.execute("SELECT SUM(amount) FROM person_ledger WHERE user_id = ? AND person_id = ? AND type='advance' AND status='approved' AND deleted=0", (firm_id, p['id'])).fetchone()[0] or 0.0
-        settlements = c.execute("SELECT SUM(amount) FROM person_ledger WHERE user_id = ? AND person_id = ? AND type='settlement' AND status='approved' AND deleted=0", (firm_id, p['id'])).fetchone()[0] or 0.0
-        balances.append({'id': p['id'], 'name': p['name'], 'net': advances - settlements})
-    conn.close()
+        adv = sum(float(l.get('amount', 0)) for l in all_person_ledger if l.get('person_id') == p['id'] and l.get('type') == 'advance' and l.get('status') == 'approved')
+        setl = sum(float(l.get('amount', 0)) for l in all_person_ledger if l.get('person_id') == p['id'] and l.get('type') == 'settlement' and l.get('status') == 'approved')
+        balances.append({'id': p['id'], 'name': p['name'], 'net': adv - setl})
+        
     return render_template_string(PERSONS_TEMPLATE, balances=balances, username=session['username'], active_page='persons')
 
-@app.route('/person_account/<int:person_id>')
+@app.route('/person_account/<string:person_id>')
 def person_account(person_id):
     if 'user_id' not in session: return redirect(url_for('login'))
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor(); firm_id = session['firm_id']
-    person = c.execute("SELECT * FROM persons WHERE id = ? AND user_id = ?", (person_id, firm_id)).fetchone()
-    if not person: conn.close(); return redirect(url_for('persons'))
-    txns = c.execute("SELECT * FROM person_ledger WHERE person_id = ? AND user_id = ? AND deleted=0 ORDER BY date DESC, time DESC, id DESC", (person_id, firm_id)).fetchall()
-    advances = c.execute("SELECT SUM(amount) FROM person_ledger WHERE person_id = ? AND user_id = ? AND type='advance' AND status='approved' AND deleted=0", (person_id, firm_id)).fetchone()[0] or 0.0
-    settlements = c.execute("SELECT SUM(amount) FROM person_ledger WHERE person_id = ? AND user_id = ? AND type='settlement' AND status='approved' AND deleted=0", (person_id, firm_id)).fetchone()[0] or 0.0
-    conn.close()
+    firm_id = session['firm_id']
+    
+    person_doc = db.collection('persons').document(person_id).get()
+    if not person_doc.exists or person_doc.to_dict().get('user_id') != firm_id: return redirect(url_for('persons'))
+    person = {'id': person_doc.id, **person_doc.to_dict()}
+    
+    txns = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('person_ledger').where('person_id', '==', person_id).where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
+    txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
+    
+    advances = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'advance' and t.get('status') == 'approved')
+    settlements = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'settlement' and t.get('status') == 'approved')
+    
     return render_template_string(PERSON_ACCOUNT_TEMPLATE, person=person, txns=txns, balance=(advances - settlements), advances=advances, settlements=settlements, username=session['username'], active_page='persons')
 
-@app.route('/edit_person/<int:id>')
+@app.route('/edit_person/<string:id>')
 def edit_person(id):
     if 'user_id' not in session: return redirect(url_for('login'))
     new_name = request.args.get('name')
     if new_name:
-        conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-        c.execute("UPDATE persons SET name=? WHERE id=? AND user_id=?", (new_name, id, session['firm_id']))
-        conn.commit(); conn.close()
+        doc_ref = db.collection('persons').document(id)
+        if doc_ref.get().to_dict().get('user_id') == session['firm_id']:
+            doc_ref.update({'name': new_name})
     return redirect(url_for('persons'))
 
-@app.route('/delete/<string:table_name>/<int:row_id>')
+@app.route('/delete/<string:table_name>/<string:row_id>')
 def delete_entry(table_name, row_id):
     if 'user_id' not in session: return redirect(url_for('login'))
     if table_name not in ['transactions', 'person_ledger', 'dasti_ledger']: return "Invalid", 400
-    conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-    res = c.execute(f"SELECT link_id FROM {table_name} WHERE id=? AND user_id=?", (row_id, session['firm_id'])).fetchone()
-    link_id = res[0] if res else ""
-    if link_id:
-        c.execute("UPDATE transactions SET deleted=1 WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-        c.execute("UPDATE person_ledger SET deleted=1 WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-        c.execute("UPDATE dasti_ledger SET deleted=1 WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-    else: c.execute(f"UPDATE {table_name} SET deleted=1 WHERE id=? AND user_id=?", (row_id, session['firm_id']))
-    conn.commit(); conn.close()
+    
+    doc_ref = db.collection(table_name).document(row_id)
+    doc_data = doc_ref.get().to_dict()
+    
+    if doc_data and doc_data.get('user_id') == session['firm_id']:
+        link_id = doc_data.get('link_id', '')
+        if link_id:
+            for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+                linked_docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
+                for d in linked_docs:
+                    d.reference.update({'deleted': 1})
+        else:
+            doc_ref.update({'deleted': 1})
+            
     return redirect(request.referrer or url_for('index'))
 
 @app.route('/trash')
 def trash():
     if 'user_id' not in session: return redirect(url_for('login'))
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
-    trashed = c.execute("SELECT * FROM transactions WHERE user_id=? AND deleted=1 ORDER BY date DESC, time DESC", (session['firm_id'],)).fetchall()
-    conn.close()
+    trashed = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', session['firm_id']).where('deleted', '==', 1).stream()]
+    trashed.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
     return render_template_string(TRASH_TEMPLATE, trashed=trashed, username=session['username'], active_page='trash')
 
 @app.route('/restore_voucher/<string:link_id>')
 def restore_voucher(link_id):
     if 'user_id' not in session: return redirect(url_for('login'))
-    conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-    c.execute("UPDATE transactions SET deleted=0 WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-    c.execute("UPDATE person_ledger SET deleted=0 WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-    c.execute("UPDATE dasti_ledger SET deleted=0 WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-    conn.commit(); conn.close()
+    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+        docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
+        for d in docs: d.reference.update({'deleted': 0})
     return redirect(url_for('trash'))
 
 @app.route('/hard_delete_voucher/<string:link_id>')
 def hard_delete_voucher(link_id):
     if 'user_id' not in session: return redirect(url_for('login'))
-    conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-    c.execute("DELETE FROM transactions WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-    c.execute("DELETE FROM person_ledger WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-    c.execute("DELETE FROM dasti_ledger WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-    conn.commit(); conn.close()
+    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+        docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
+        for d in docs: d.reference.delete()
     return redirect(url_for('trash'))
 
 @app.route('/reports')
 def reports():
     if 'user_id' not in session: return redirect(url_for('login'))
     firm_id = session['firm_id']
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
     
     start_date = request.args.get('start_date', '')
     end_date = request.args.get('end_date', '')
     category = request.args.get('category', '')
     report_account = request.args.get('report_account', 'main')
     
-    query = "SELECT * FROM transactions WHERE user_id=? AND deleted=0 AND status='approved'"
-    params = [firm_id]
+    collection_name = 'transactions'
+    pid_filter = None
+    pid_field = None
     
     if report_account.startswith('person_'):
-        pid = report_account.split('_')[1]
-        query = "SELECT * FROM person_ledger WHERE user_id=? AND person_id=? AND deleted=0 AND status='approved'"
-        params = [firm_id, pid]
+        collection_name = 'person_ledger'
+        pid_filter = report_account.split('_')[1]
+        pid_field = 'person_id'
     elif report_account.startswith('dasti_'):
-        did = report_account.split('_')[1]
-        query = "SELECT * FROM dasti_ledger WHERE user_id=? AND dasti_person_id=? AND deleted=0 AND status='approved'"
-        params = [firm_id, did]
+        collection_name = 'dasti_ledger'
+        pid_filter = report_account.split('_')[1]
+        pid_field = 'dasti_person_id'
         
-    if start_date:
-        query += " AND date >= ?"
-        params.append(start_date)
-    if end_date:
-        query += " AND date <= ?"
-        params.append(end_date)
-    if category:
-        query += " AND category = ?"
-        params.append(category)
+    query = db.collection(collection_name).where('user_id', '==', firm_id).where('deleted', '==', 0).where('status', '==', 'approved')
+    if pid_filter: query = query.where(pid_field, '==', pid_filter)
+    
+    raw_results = [doc.to_dict() for doc in query.stream()]
+    
+    results = []
+    for r in raw_results:
+        if start_date and r.get('date', '') < start_date: continue
+        if end_date and r.get('date', '') > end_date: continue
+        if category and r.get('category', '') != category: continue
+        results.append(r)
         
-    query += " ORDER BY date DESC, time DESC"
-    results = c.execute(query, tuple(params)).fetchall()
+    results.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
     
-    total_in = sum(r['amount'] for r in results if r['type'] in ('income', 'settlement', 'dasti_voucher_in'))
+    total_in = sum(float(r.get('amount', 0)) for r in results if r.get('type') in ('income', 'settlement', 'dasti_voucher_in'))
     
-    # Reports should only sum physical money out, bypass 'batch_ledger_out' (Slips) to prevent double counting
-    total_out = sum(r['amount'] for r in results if r['type'] in ('expense', 'advance', 'dasti_out', 'dasti_voucher_out'))
+    # MATH FIX: Only subtract actual physical cash out in the reports to prevent double deduction
+    if report_account == 'main':
+        total_out = sum(float(r.get('amount', 0)) for r in results if r.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out'))
+    else:
+        total_out = sum(float(r.get('amount', 0)) for r in results if r.get('type') in ('expense', 'advance', 'dasti_out', 'dasti_voucher_out'))
     
-    persons = c.execute("SELECT * FROM persons WHERE user_id = ? ORDER BY name ASC", (firm_id,)).fetchall()
-    dasti_persons = c.execute("SELECT * FROM dasti_persons WHERE user_id = ? ORDER BY name ASC", (firm_id,)).fetchall()
+    persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('persons').where('user_id', '==', firm_id).stream()]
+    dasti_persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('dasti_persons').where('user_id', '==', firm_id).stream()]
     cats = get_categories(firm_id)
     
-    conn.close()
     return render_template_string(REPORTS_TEMPLATE, results=results, total_in=total_in, total_out=total_out, categories=cats, persons=persons, dasti_persons=dasti_persons, start_date=start_date, end_date=end_date, category=category, report_account=report_account, username=session['username'], active_page='reports')
 
 @app.route('/export_reports')
 def export_reports():
     if 'user_id' not in session: return redirect(url_for('login'))
     firm_id = session['firm_id']
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
     
     start_date, end_date, category, report_account = request.args.get('start_date', ''), request.args.get('end_date', ''), request.args.get('category', ''), request.args.get('report_account', 'main')
     
-    query = "SELECT date, time, payment_mode, category, description, type, amount, approved_by FROM transactions WHERE user_id=? AND deleted=0 AND status='approved'"
-    params = [firm_id]
-    if report_account.startswith('person_'):
-        pid = report_account.split('_')[1]
-        query = "SELECT date, time, payment_mode, category, description, type, amount, approved_by FROM person_ledger WHERE user_id=? AND person_id=? AND deleted=0 AND status='approved'"
-        params = [firm_id, pid]
-    elif report_account.startswith('dasti_'):
-        did = report_account.split('_')[1]
-        query = "SELECT date, time, payment_mode, category, description, type, amount, approved_by FROM dasti_ledger WHERE user_id=? AND dasti_person_id=? AND deleted=0 AND status='approved'"
-        params = [firm_id, did]
-        
-    if start_date: query += " AND date >= ?"; params.append(start_date)
-    if end_date: query += " AND date <= ?"; params.append(end_date)
-    if category: query += " AND category = ?"; params.append(category)
-    query += " ORDER BY date ASC, time ASC" 
+    collection_name = 'transactions'
+    pid_filter = None
+    pid_field = None
     
-    results = c.execute(query, tuple(params)).fetchall()
-    conn.close()
+    if report_account.startswith('person_'):
+        collection_name = 'person_ledger'
+        pid_filter = report_account.split('_')[1]
+        pid_field = 'person_id'
+    elif report_account.startswith('dasti_'):
+        collection_name = 'dasti_ledger'
+        pid_filter = report_account.split('_')[1]
+        pid_field = 'dasti_person_id'
+        
+    query = db.collection(collection_name).where('user_id', '==', firm_id).where('deleted', '==', 0).where('status', '==', 'approved')
+    if pid_filter: query = query.where(pid_field, '==', pid_filter)
+    
+    raw_results = [doc.to_dict() for doc in query.stream()]
+    
+    results = []
+    for r in raw_results:
+        if start_date and r.get('date', '') < start_date: continue
+        if end_date and r.get('date', '') > end_date: continue
+        if category and r.get('category', '') != category: continue
+        results.append(r)
+        
+    results.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
     
     def generate():
         data = StringIO()
@@ -993,114 +515,109 @@ def export_reports():
         writer.writerow(('Date', 'Time', 'Mode', 'Category', 'Description', 'Type', 'Amount (INR)', 'Approved By'))
         yield data.getvalue(); data.seek(0); data.truncate(0)
         for r in results:
-            writer.writerow((r['date'], r['time'], r['payment_mode'], r['category'], r['description'], r['type'], r['amount'], r['approved_by']))
+            writer.writerow((r.get('date', ''), r.get('time', ''), r.get('payment_mode', ''), r.get('category', ''), r.get('description', ''), r.get('type', ''), r.get('amount', 0), r.get('approved_by', '')))
             yield data.getvalue(); data.seek(0); data.truncate(0)
             
     return Response(generate(), mimetype='text/csv', headers={"Content-Disposition": "attachment; filename=Firm_Report_Export.csv"})
 
-@app.route('/download_cash_json')
-def download_cash_json():
-    if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
-    data = {
-        "users": [dict(row) for row in c.execute("SELECT * FROM users").fetchall()],
-        "categories": [dict(row) for row in c.execute("SELECT * FROM categories").fetchall()],
-        "persons": [dict(row) for row in c.execute("SELECT * FROM persons").fetchall()],
-        "dasti_persons": [dict(row) for row in c.execute("SELECT * FROM dasti_persons").fetchall()],
-        "transactions": [dict(row) for row in c.execute("SELECT * FROM transactions").fetchall()],
-        "person_ledger": [dict(row) for row in c.execute("SELECT * FROM person_ledger").fetchall()],
-        "dasti_ledger": [dict(row) for row in c.execute("SELECT * FROM dasti_ledger").fetchall()]
-    }
-    conn.close()
-    return Response(json.dumps(data, indent=4), mimetype='application/json', headers={"Content-Disposition": "attachment; filename=cash.json"})
-
-@app.route('/edit/<string:table_name>/<int:row_id>', methods=['GET', 'POST'])
+@app.route('/edit/<string:table_name>/<string:row_id>', methods=['GET', 'POST'])
 def edit_entry(table_name, row_id):
     if 'user_id' not in session: return redirect(url_for('login'))
     if table_name not in ['transactions', 'person_ledger', 'dasti_ledger']: return "Invalid", 400
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
-    entry = c.execute(f"SELECT * FROM {table_name} WHERE id=? AND user_id=?", (row_id, session['firm_id'])).fetchone()
+    
+    doc_ref = db.collection(table_name).document(row_id)
+    doc_data = doc_ref.get().to_dict()
+    if not doc_data or doc_data.get('user_id') != session['firm_id']: return redirect(url_for('index'))
+    
+    entry = {'id': row_id, **doc_data}
     
     if request.method == 'POST':
-        date, time_v, mode, cat, desc, req_type, amt = request.form['date'], request.form['time'], request.form['payment_mode'], request.form['category'], request.form['description'], request.form['type'], float(request.form['amount'])
-        approved_by = request.form.get('approved_by', entry['approved_by']) # Manual Admin Override
+        update_data = {
+            'date': request.form['date'],
+            'time': request.form['time'],
+            'payment_mode': request.form['payment_mode'],
+            'category': request.form['category'],
+            'amount': float(request.form['amount']),
+            'approved_by': request.form.get('approved_by', entry.get('approved_by'))
+        }
         
-        if entry['link_id']:
-            c.execute("UPDATE transactions SET date=?, time=?, payment_mode=?, category=?, amount=?, approved_by=? WHERE link_id=? AND user_id=?", (date, time_v, mode, cat, amt, approved_by, entry['link_id'], session['firm_id']))
-            c.execute("UPDATE person_ledger SET date=?, time=?, payment_mode=?, category=?, amount=?, approved_by=? WHERE link_id=? AND user_id=?", (date, time_v, mode, cat, amt, approved_by, entry['link_id'], session['firm_id']))
-            c.execute("UPDATE dasti_ledger SET date=?, time=?, payment_mode=?, category=?, amount=?, approved_by=? WHERE link_id=? AND user_id=?", (date, time_v, mode, cat, amt, approved_by, entry['link_id'], session['firm_id']))
+        if entry.get('link_id'):
+            # Update all linked records
+            for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+                linked_docs = db.collection(collection).where('link_id', '==', entry.get('link_id')).where('user_id', '==', session['firm_id']).stream()
+                for d in linked_docs: d.reference.update(update_data)
         else:
-            c.execute(f"UPDATE {table_name} SET date=?, time=?, payment_mode=?, category=?, description=?, type=?, amount=?, approved_by=? WHERE id=? AND user_id=?", (date, time_v, mode, cat, desc, req_type, amt, approved_by, row_id, session['firm_id']))
-        conn.commit(); conn.close()
+            update_data['description'] = request.form['description']
+            update_data['type'] = request.form['type']
+            doc_ref.update(update_data)
+            
         return redirect(request.referrer or url_for('index'))
-    conn.close()
+        
     return render_template_string(EDIT_TEMPLATE, entry=entry, table_name=table_name, username=session['username'])
 
 @app.route('/manage_users')
 def manage_users():
     if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
-    users = c.execute("SELECT id, username, role, can_approve FROM users WHERE firm_id=?", (session['firm_id'],)).fetchall()
-    conn.close()
+    users = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('users').where('firm_id', '==', session['firm_id']).stream()]
     return render_template_string(USERS_TEMPLATE, users=users, username=session['username'], active_page='users')
 
-@app.route('/edit_user/<int:uid>', methods=['GET', 'POST'])
+@app.route('/edit_user/<string:uid>', methods=['GET', 'POST'])
 def edit_user(uid):
     if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
+    
+    doc_ref = db.collection('users').document(uid)
+    user_data = doc_ref.get().to_dict()
+    if not user_data or user_data.get('firm_id') != session['firm_id']: return redirect(url_for('manage_users'))
     
     if request.method == 'POST':
-        uname = request.form['username']
-        role = request.form['role']
-        can_app = int(request.form.get('can_approve', 0))
+        update_data = {
+            'username': request.form['username'],
+            'role': request.form['role'],
+            'can_approve': int(request.form.get('can_approve', 0))
+        }
         new_pw = request.form.get('password', '').strip()
+        if new_pw: update_data['password'] = generate_password_hash(new_pw)
         
-        if new_pw:
-            c.execute("UPDATE users SET username=?, role=?, can_approve=?, password=? WHERE id=? AND firm_id=?", (uname, role, can_app, generate_password_hash(new_pw), uid, session['firm_id']))
-        else:
-            c.execute("UPDATE users SET username=?, role=?, can_approve=? WHERE id=? AND firm_id=?", (uname, role, can_app, uid, session['firm_id']))
-        conn.commit(); conn.close()
+        doc_ref.update(update_data)
         return redirect(url_for('manage_users'))
         
-    user_data = c.execute("SELECT * FROM users WHERE id=? AND firm_id=?", (uid, session['firm_id'])).fetchone()
-    conn.close()
-    return render_template_string(EDIT_USER_TEMPLATE, edit_user=user_data, username=session['username'], active_page='users')
+    edit_user_obj = {'id': uid, **user_data}
+    return render_template_string(EDIT_USER_TEMPLATE, edit_user=edit_user_obj, username=session['username'], active_page='users')
 
 @app.route('/add_user', methods=['POST'])
 def add_user():
     if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
-    conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-    c.execute("INSERT INTO users (username, password, firm_name, firm_id, role, can_approve) VALUES (?, ?, ?, ?, ?, ?)",
-              (request.form['new_username'], generate_password_hash(request.form['new_password']), session['firm_name'], session['firm_id'], request.form['role'], int(request.form.get('can_approve', 0))))
-    conn.commit(); conn.close()
+    db.collection('users').add({
+        'username': request.form['new_username'],
+        'password': generate_password_hash(request.form['new_password']),
+        'firm_name': session['firm_name'],
+        'firm_id': session['firm_id'],
+        'role': request.form['role'],
+        'can_approve': int(request.form.get('can_approve', 0))
+    })
     return redirect(url_for('manage_users'))
 
 @app.route('/approvals')
 def approvals():
     if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
-    pending = c.execute("SELECT * FROM transactions WHERE user_id=? AND status='pending' AND deleted=0 ORDER BY id DESC", (session['firm_id'],)).fetchall()
-    conn.close()
+    pending = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', session['firm_id']).where('status', '==', 'pending').where('deleted', '==', 0).stream()]
+    pending.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
     return render_template_string(APPROVALS_TEMPLATE, pending=pending, username=session['username'], active_page='approvals')
 
 @app.route('/approve_voucher/<string:link_id>')
 def approve_voucher(link_id):
     if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
-    conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-    c.execute("UPDATE transactions SET status='approved', approved_by=? WHERE link_id=? AND user_id=?", (session['username'], link_id, session['firm_id']))
-    c.execute("UPDATE person_ledger SET status='approved', approved_by=? WHERE link_id=? AND user_id=?", (session['username'], link_id, session['firm_id']))
-    c.execute("UPDATE dasti_ledger SET status='approved', approved_by=? WHERE link_id=? AND user_id=?", (session['username'], link_id, session['firm_id']))
-    conn.commit(); conn.close()
+    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+        docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
+        for d in docs: d.reference.update({'status': 'approved', 'approved_by': session['username']})
     return redirect(request.referrer or url_for('approvals'))
 
 @app.route('/reject_voucher/<string:link_id>')
 def reject_voucher(link_id):
     if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
-    conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-    c.execute("UPDATE transactions SET deleted=1 WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-    c.execute("UPDATE person_ledger SET deleted=1 WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-    c.execute("UPDATE dasti_ledger SET deleted=1 WHERE link_id=? AND user_id=?", (link_id, session['firm_id']))
-    conn.commit(); conn.close()
+    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+        docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
+        for d in docs: d.reference.update({'deleted': 1})
     return redirect(request.referrer or url_for('approvals'))
 
 @app.route('/add_express', methods=['POST'])
@@ -1109,11 +626,21 @@ def add_express():
     txn_status = 'approved' if session.get('can_approve') == 1 else 'pending'
     approver = session['username'] if txn_status == 'approved' else ''
     
-    conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-    link_id = uuid.uuid4().hex[:12]
-    c.execute("INSERT INTO transactions (user_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-              (session['firm_id'], request.form['date'], request.form['time'], 'Cash', 'General', request.form['description'], request.form['type'], float(request.form['amount']), link_id, txn_status, approver))
-    conn.commit(); conn.close()
+    db.collection('transactions').add({
+        'user_id': session['firm_id'],
+        'date': request.form['date'],
+        'time': request.form['time'],
+        'payment_mode': 'Cash',
+        'category': 'General',
+        'description': request.form['description'],
+        'type': request.form['type'],
+        'amount': float(request.form['amount']),
+        'link_id': uuid.uuid4().hex[:12],
+        'status': txn_status,
+        'approved_by': approver,
+        'deleted': 0,
+        'created_at': time.time()
+    })
     return redirect(request.referrer or url_for('index'))
 
 @app.route('/add_transfer', methods=['POST'])
@@ -1126,20 +653,18 @@ def add_transfer():
     txn_status = 'approved' if session.get('can_approve') == 1 else 'pending'
     approver = session['username'] if txn_status == 'approved' else ''
     
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
-    person = c.execute("SELECT name FROM persons WHERE id = ? AND user_id = ?", (person_id, firm_id)).fetchone()
-    if not person: conn.close(); return redirect(request.referrer)
-    
-    person_name, link_id = person['name'], uuid.uuid4().hex[:12]
+    person_doc = db.collection('persons').document(person_id).get()
+    if not person_doc.exists: return redirect(request.referrer)
+    person_name = person_doc.to_dict().get('name', '')
+    link_id = uuid.uuid4().hex[:12]
     
     if direction == 'main_to_person':
-        c.execute("INSERT INTO transactions (user_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (firm_id, date_val, time_val, 'Cash', 'General', f"Transfer to {person_name}: {desc}", 'dasti_out', amt, link_id, txn_status, approver))
-        c.execute("INSERT INTO person_ledger (user_id, person_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (firm_id, person_id, date_val, time_val, 'Cash', 'General', f"Rcvd from Main: {desc}", 'advance', amt, link_id, txn_status, approver))
+        db.collection('transactions').add({'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Transfer to {person_name}: {desc}", 'type': 'dasti_out', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
+        db.collection('person_ledger').add({'user_id': firm_id, 'person_id': person_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Rcvd from Main: {desc}", 'type': 'advance', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
     else:
-        c.execute("INSERT INTO person_ledger (user_id, person_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (firm_id, person_id, date_val, time_val, 'Cash', 'General', f"Paid to Main: {desc}", 'settlement', amt, link_id, txn_status, approver))
-        c.execute("INSERT INTO transactions (user_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (firm_id, date_val, time_val, 'Cash', 'General', f"Transfer from {person_name}: {desc}", 'income', amt, link_id, txn_status, approver))
+        db.collection('person_ledger').add({'user_id': firm_id, 'person_id': person_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Paid to Main: {desc}", 'type': 'settlement', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
+        db.collection('transactions').add({'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Transfer from {person_name}: {desc}", 'type': 'income', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
                   
-    conn.commit(); conn.close()
     return redirect(request.referrer or url_for('index'))
 
 @app.route('/add_batch_unified', methods=['POST'])
@@ -1155,108 +680,152 @@ def add_batch_unified():
     txn_status = 'approved' if session.get('can_approve') == 1 else 'pending'
     approver = session['username'] if txn_status == 'approved' else ''
     
-    conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
     existing_cats = get_categories(firm_id)
     account_type = 'main'
     primary_id = None
     person_name = ''
     
     if primary_account_raw == 'new_dasti':
-        c.execute("INSERT INTO dasti_persons (user_id, name) VALUES (?, ?)", (firm_id, new_account_name))
-        primary_id = c.lastrowid
+        new_ref = db.collection('dasti_persons').document()
+        new_ref.set({'user_id': firm_id, 'name': new_account_name})
+        primary_id = new_ref.id
         account_type, person_name = 'dasti', new_account_name
     elif primary_account_raw == 'new_person':
-        c.execute("INSERT INTO persons (user_id, name) VALUES (?, ?)", (firm_id, new_account_name))
-        primary_id = c.lastrowid
+        new_ref = db.collection('persons').document()
+        new_ref.set({'user_id': firm_id, 'name': new_account_name})
+        primary_id = new_ref.id
         account_type, person_name = 'person', new_account_name
     elif primary_account_raw.startswith('person_'):
-        primary_id = int(primary_account_raw.split('_')[1])
+        primary_id = primary_account_raw.split('_')[1]
         account_type = 'person'
-        res = c.execute("SELECT name FROM persons WHERE id=? AND user_id=?", (primary_id, firm_id)).fetchone()
-        if res: person_name = res['name']
+        person_name = db.collection('persons').document(primary_id).get().to_dict().get('name', '')
     elif primary_account_raw.startswith('dasti_'):
-        primary_id = int(primary_account_raw.split('_')[1])
+        primary_id = primary_account_raw.split('_')[1]
         account_type = 'dasti'
-        res = c.execute("SELECT name FROM dasti_persons WHERE id=? AND user_id=?", (primary_id, firm_id)).fetchone()
-        if res: person_name = res['name']
+        person_name = db.collection('dasti_persons').document(primary_id).get().to_dict().get('name', '')
         
     for i in range(len(descs)):
         if amts[i].strip() and float(amts[i]) >= 0:
             amt, desc = float(amts[i]), descs[i].strip()
             cat = cust_cats[i].strip() if cats[i] == 'Other' and cust_cats[i].strip() else cats[i]
             if cat not in existing_cats:
-                try: c.execute("INSERT INTO categories (firm_id, name) VALUES (?, ?)", (firm_id, cat))
-                except sqlite3.IntegrityError: pass
+                db.collection('categories').add({'firm_id': firm_id, 'name': cat})
+                existing_cats.append(cat)
+                
             link_id = uuid.uuid4().hex[:12]
+            
+            base_txn = {'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode, 'category': cat, 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()}
 
             if account_type == 'main':
                 db_type = 'income' if txn_nature == 'receive_cash' else 'expense'
-                c.execute("INSERT INTO transactions (user_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (firm_id, date_val, time_val, mode, cat, desc, db_type, amt, link_id, txn_status, approver))
+                db.collection('transactions').add({**base_txn, 'description': desc, 'type': db_type})
+                
             elif account_type == 'person':
                 if txn_nature == 'slip_in':
-                    c.execute("INSERT INTO person_ledger (user_id, person_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (firm_id, primary_id, date_val, time_val, mode, cat, desc, 'settlement', amt, link_id, txn_status, approver))
-                    c.execute("INSERT INTO transactions (user_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (firm_id, date_val, time_val, mode, cat, f"Slip ({person_name}): {desc}", 'batch_ledger_out', amt, link_id, txn_status, approver))
+                    db.collection('person_ledger').add({**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    db.collection('transactions').add({**base_txn, 'description': f"Slip ({person_name}): {desc}", 'type': 'batch_ledger_out'})
                 elif txn_nature == 'advance':
-                    c.execute("INSERT INTO person_ledger (user_id, person_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (firm_id, primary_id, date_val, time_val, mode, cat, desc, 'advance', amt, link_id, txn_status, approver))
-                    c.execute("INSERT INTO transactions (user_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (firm_id, date_val, time_val, mode, cat, f"Transfer Out ({person_name}): {desc}", 'dasti_out', amt, link_id, txn_status, approver))
+                    db.collection('person_ledger').add({**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'advance'})
+                    db.collection('transactions').add({**base_txn, 'description': f"Transfer Out ({person_name}): {desc}", 'type': 'dasti_out'})
                 elif txn_nature == 'receive_cash':
-                    c.execute("INSERT INTO person_ledger (user_id, person_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (firm_id, primary_id, date_val, time_val, mode, cat, desc, 'settlement', amt, link_id, txn_status, approver))
-                    c.execute("INSERT INTO transactions (user_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (firm_id, date_val, time_val, mode, cat, f"Transfer In ({person_name}): {desc}", 'income', amt, link_id, txn_status, approver))
+                    db.collection('person_ledger').add({**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    db.collection('transactions').add({**base_txn, 'description': f"Transfer In ({person_name}): {desc}", 'type': 'income'})
+                    
             elif account_type == 'dasti':
                 if txn_nature == 'slip_in':
-                    c.execute("INSERT INTO dasti_ledger (user_id, dasti_person_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (firm_id, primary_id, date_val, time_val, mode, cat, desc, 'settlement', amt, link_id, txn_status, approver))
-                    c.execute("INSERT INTO transactions (user_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (firm_id, date_val, time_val, mode, cat, f"Dasti Slip ({person_name}): {desc}", 'batch_ledger_out', amt, link_id, txn_status, approver))
+                    db.collection('dasti_ledger').add({**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    db.collection('transactions').add({**base_txn, 'description': f"Dasti Slip ({person_name}): {desc}", 'type': 'batch_ledger_out'})
                 elif txn_nature == 'advance':
-                    c.execute("INSERT INTO dasti_ledger (user_id, dasti_person_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (firm_id, primary_id, date_val, time_val, mode, cat, desc, 'advance', amt, link_id, txn_status, approver))
-                    c.execute("INSERT INTO transactions (user_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (firm_id, date_val, time_val, mode, cat, f"Dasti Out ({person_name}): {desc}", 'dasti_voucher_out', amt, link_id, txn_status, approver))
+                    db.collection('dasti_ledger').add({**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'advance'})
+                    db.collection('transactions').add({**base_txn, 'description': f"Dasti Out ({person_name}): {desc}", 'type': 'dasti_voucher_out'})
                 elif txn_nature == 'receive_cash':
-                    c.execute("INSERT INTO dasti_ledger (user_id, dasti_person_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (firm_id, primary_id, date_val, time_val, mode, cat, desc, 'settlement', amt, link_id, txn_status, approver))
-                    c.execute("INSERT INTO transactions (user_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (firm_id, date_val, time_val, mode, cat, f"Dasti In ({person_name}): {desc}", 'dasti_voucher_in', amt, link_id, txn_status, approver))
-    conn.commit(); conn.close()
+                    db.collection('dasti_ledger').add({**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    db.collection('transactions').add({**base_txn, 'description': f"Dasti In ({person_name}): {desc}", 'type': 'dasti_voucher_in'})
+                    
     return redirect(request.referrer or url_for('index'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if not has_users(): return redirect(url_for('register'))
     if request.method == 'POST':
-        conn = sqlite3.connect('cashbook.db'); conn.row_factory = sqlite3.Row; c = conn.cursor()
-        user = c.execute("SELECT * FROM users WHERE username = ?", (request.form['username'],)).fetchone()
-        conn.close()
-        if user and check_password_hash(user['password'], request.form['password']):
-            session['user_id'] = user['id']
-            session['username'] = user['username']
-            session['firm_name'] = user['firm_name']
-            session['firm_id'] = user['firm_id'] or user['id']
-            session['role'] = user['role']
-            session['can_approve'] = user['can_approve']
-            return redirect(url_for('index'))
+        users_stream = db.collection('users').where('username', '==', request.form['username']).stream()
+        user_doc = next(users_stream, None)
+        
+        if user_doc:
+            user = user_doc.to_dict()
+            if check_password_hash(user['password'], request.form['password']):
+                session['user_id'] = user_doc.id
+                session['username'] = user['username']
+                session['firm_name'] = user['firm_name']
+                session['firm_id'] = user.get('firm_id', user_doc.id)
+                session['role'] = user.get('role', 'superadmin')
+                session['can_approve'] = user.get('can_approve', 1)
+                return redirect(url_for('index'))
     return render_template_string(LOGIN_TEMPLATE)
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if has_users(): return "Setup complete. Ask the Superadmin to create an account for you.", 403
     if request.method == 'POST':
-        conn = sqlite3.connect('cashbook.db'); c = conn.cursor()
-        c.execute("INSERT INTO users (username, password, firm_name, role, can_approve) VALUES (?, ?, ?, 'superadmin', 1)", (request.form['username'], generate_password_hash(request.form['password']), request.form['firm_name']))
-        user_id = c.lastrowid
-        c.execute("UPDATE users SET firm_id = ? WHERE id = ?", (user_id, user_id))
+        new_user_ref = db.collection('users').document()
+        user_id = new_user_ref.id
         
-        session['user_id'], session['firm_id'], session['username'], session['firm_name'] = user_id, user_id, request.form['username'], request.form['firm_name']
-        session['role'], session['can_approve'] = 'superadmin', 1
+        new_user_ref.set({
+            'username': request.form['username'],
+            'password': generate_password_hash(request.form['password']),
+            'firm_name': request.form['firm_name'],
+            'firm_id': user_id,
+            'role': 'superadmin',
+            'can_approve': 1
+        })
+        
+        session['user_id'] = user_id
+        session['firm_id'] = user_id
+        session['username'] = request.form['username']
+        session['firm_name'] = request.form['firm_name']
+        session['role'] = 'superadmin'
+        session['can_approve'] = 1
         
         opening_balance = float(request.form.get('opening_balance', 0))
         if opening_balance > 0:
             now = datetime.now()
-            c.execute("INSERT INTO transactions (user_id, date, time, payment_mode, category, description, type, amount, link_id, status, approved_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?)",
-                      (user_id, now.strftime('%Y-%m-%d'), now.strftime('%H:%M'), 'Cash', 'General', 'Opening Balance', 'income', opening_balance, uuid.uuid4().hex[:12], session['username']))
-        
-        conn.commit(); conn.close()
+            db.collection('transactions').add({
+                'user_id': user_id,
+                'date': now.strftime('%Y-%m-%d'),
+                'time': now.strftime('%H:%M'),
+                'payment_mode': 'Cash',
+                'category': 'General',
+                'description': 'Opening Balance',
+                'type': 'income',
+                'amount': opening_balance,
+                'link_id': uuid.uuid4().hex[:12],
+                'status': 'approved',
+                'approved_by': session['username'],
+                'deleted': 0,
+                'created_at': time.time()
+            })
+            
         return redirect(url_for('index'))
     return render_template_string(REGISTER_TEMPLATE)
+
+@app.route('/download_cash_json')
+def download_cash_json():
+    if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
+    
+    data = {
+        "users": [dict(doc.to_dict()) for doc in db.collection('users').stream()],
+        "categories": [dict(doc.to_dict()) for doc in db.collection('categories').stream()],
+        "persons": [dict(doc.to_dict()) for doc in db.collection('persons').stream()],
+        "dasti_persons": [dict(doc.to_dict()) for doc in db.collection('dasti_persons').stream()],
+        "transactions": [dict(doc.to_dict()) for doc in db.collection('transactions').stream()],
+        "person_ledger": [dict(doc.to_dict()) for doc in db.collection('person_ledger').stream()],
+        "dasti_ledger": [dict(doc.to_dict()) for doc in db.collection('dasti_ledger').stream()]
+    }
+    return Response(json.dumps(data, indent=4), mimetype='application/json', headers={"Content-Disposition": "attachment; filename=cash.json"})
 
 @app.route('/logout')
 def logout(): session.clear(); return redirect(url_for('login'))
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+if __name__ == '__main__':
+    # (Removed webbrowser launch logic since this runs on a cloud server)
+    pass

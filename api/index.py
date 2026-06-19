@@ -463,6 +463,7 @@ USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + 
                 <div class="form-group" style="padding-bottom: 10px; display: flex; flex-direction: column; gap: 5px;">
                     <label><input type="checkbox" name="can_approve" value="1"> Grant Apprv</label>
                     <label><input type="checkbox" name="can_edit" value="1"> Grant Edit/Del</label>
+                    <label><input type="checkbox" name="can_express_cashout" value="1"> Grant Exp Cash-Out</label>
                 </div>
                 <div class="form-group" style="padding-bottom: 10px; display: flex; flex-direction: column; gap: 5px;">
                     <label><input type="checkbox" name="can_view_reports" value="1"> Grant Reports</label>
@@ -482,7 +483,8 @@ USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + 
                         Apprv: {% if u.can_approve %}✅{% else %}❌{% endif %} | 
                         Edit: {% if u.can_edit %}✅{% else %}❌{% endif %} | 
                         Rep: {% if u.can_view_reports %}✅{% else %}❌{% endif %} | 
-                        Trash: {% if u.can_view_trash %}✅{% else %}❌{% endif %}
+                        Trash: {% if u.can_view_trash %}✅{% else %}❌{% endif %} | 
+                        ExpOut: {% if u.can_express_cashout %}✅{% else %}❌{% endif %}
                     </td>
                     <td style="text-align: center;"><a href="/edit_user/{{ u.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️ Edit User</a></td>
                 </tr>{% endfor %}
@@ -509,6 +511,7 @@ EDIT_USER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit User</title>''' +
                 <div class="form-group" style="padding-bottom: 15px; margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
                     <label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_approve" value="1" {% if edit_user.can_approve %}checked{% endif %} style="width: auto;"> Grant Voucher Approval Rights</label>
                     <label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_edit" value="1" {% if edit_user.can_edit %}checked{% endif %} style="width: auto;"> Grant Edit / Delete Rights</label>
+                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_express_cashout" value="1" {% if edit_user.can_express_cashout %}checked{% endif %} style="width: auto;"> Grant Express Cash-Out</label>
                     <label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_view_reports" value="1" {% if edit_user.can_view_reports %}checked{% endif %} style="width: auto;"> Grant Report Access</label>
                     <label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_view_trash" value="1" {% if edit_user.can_view_trash %}checked{% endif %} style="width: auto;"> Grant Trash Bin Access</label>
                 </div>
@@ -682,7 +685,7 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
                 <input type="text" name="description" placeholder="Description / Reason" required style="flex: 3; min-width: 200px; border-color: #a5b4fc;">
                 <select name="type" required style="flex: 1; min-width: 150px; font-weight: bold; border-color: #a5b4fc;">
                     <option value="income">➕ Cash In</option>
-                    {% if session.get('role') == 'superadmin' %}
+                    {% if session.get('can_express_cashout') == 1 %}
                     <option value="expense">➖ Cash Out</option>
                     {% endif %}
                 </select>
@@ -712,7 +715,7 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
             </div>
         </div>
         
-        <div class="card no-print" style="padding: 25px;"><h3 style="margin-bottom: 15px; font-size: 1.3em;">⚡ Master Advanced Batch Entry</h3>''' + ENTRY_FORM_HTML + '''</div>
+        <div class="card no-print" style="padding: 25px;"><h3 style="margin-bottom: 15px; font-size: 1.3em;">⚡ Cash in/ Cash out</h3>''' + ENTRY_FORM_HTML + '''</div>
         
         <div class="ledger-container">
             <div class="ledger-col"><h3 class="ledger-title" style="color: var(--success); border-bottom: 3px solid var(--success);">Receipts (+ IN)</h3>
@@ -1004,7 +1007,7 @@ def index():
     expenses = [t for t in all_txns if t.get('type') in ('expense', 'batch_ledger_out')]
     
     incomes.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
-    expenses.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0))) 
+    expenses.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)))
     
     total_in_actual = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in') and t.get('status') == 'approved')
     total_out_actual = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out') and t.get('status') == 'approved')
@@ -1489,6 +1492,7 @@ def edit_user(uid):
             'role': request.form['role'],
             'can_approve': int(request.form.get('can_approve', 0)),
             'can_edit': int(request.form.get('can_edit', 0)),
+            'can_express_cashout': int(request.form.get('can_express_cashout', 0)),
             'can_view_reports': int(request.form.get('can_view_reports', 0)),
             'can_view_trash': int(request.form.get('can_view_trash', 0))
         }
@@ -1512,6 +1516,7 @@ def add_user():
         'role': request.form['role'],
         'can_approve': int(request.form.get('can_approve', 0)),
         'can_edit': int(request.form.get('can_edit', 0)),
+        'can_express_cashout': int(request.form.get('can_express_cashout', 0)),
         'can_view_reports': int(request.form.get('can_view_reports', 0)),
         'can_view_trash': int(request.form.get('can_view_trash', 0))
     })
@@ -1578,6 +1583,30 @@ def add_express():
         'deleted': 0,
         'created_at': time.time()
     })
+    return redirect(request.referrer or url_for('index'))
+
+@app.route('/add_transfer', methods=['POST'])
+def add_transfer():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    firm_id = session['firm_id']
+    date_val, time_val, direction, person_id = request.form['date'], request.form['time'], request.form['direction'], request.form['person_id']
+    desc, amt = request.form['description'].strip(), float(request.form['amount'])
+    
+    txn_status = 'pending'
+    approver = ''
+    
+    person_doc = db.collection('persons').document(person_id).get()
+    if not person_doc.exists: return redirect(request.referrer)
+    person_name = person_doc.to_dict().get('name', '')
+    link_id = uuid.uuid4().hex[:12]
+    
+    if direction == 'main_to_person':
+        db.collection('transactions').add({'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Transfer to {person_name}: {desc}", 'type': 'dasti_out', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
+        db.collection('person_ledger').add({'user_id': firm_id, 'person_id': person_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Rcvd from Main: {desc}", 'type': 'advance', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
+    else:
+        db.collection('person_ledger').add({'user_id': firm_id, 'person_id': person_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Paid to Main: {desc}", 'type': 'settlement', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
+        db.collection('transactions').add({'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Transfer from {person_name}: {desc}", 'type': 'income', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
+                  
     return redirect(request.referrer or url_for('index'))
 
 @app.route('/add_batch_unified', methods=['POST'])
@@ -1675,6 +1704,7 @@ def login():
                 
                 session['can_approve'] = user.get('can_approve', 0)
                 session['can_edit'] = user.get('can_edit', 0)
+                session['can_express_cashout'] = user.get('can_express_cashout', 0)
                 session['can_view_reports'] = user.get('can_view_reports', 0)
                 session['can_view_trash'] = user.get('can_view_trash', 0)
                 
@@ -1699,6 +1729,7 @@ def register():
             'role': 'superadmin',
             'can_approve': 1,
             'can_edit': 1,
+            'can_express_cashout': 1,
             'can_view_reports': 1,
             'can_view_trash': 1
         })
@@ -1710,6 +1741,7 @@ def register():
         session['role'] = 'superadmin'
         session['can_approve'] = 1
         session['can_edit'] = 1
+        session['can_express_cashout'] = 1
         session['can_view_reports'] = 1
         session['can_view_trash'] = 1
         

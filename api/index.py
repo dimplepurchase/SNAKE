@@ -528,27 +528,58 @@ APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Pending Approvals</tit
     <div class="container">''' + NAVBAR_HTML + '''
         
         <div class="card" style="margin-bottom: 20px;">
-            <h3 style="margin-top: 0; font-size: 1.2em; color: var(--primary);">✅ Bulk Approve by Date</h3>
+            <h3 style="margin-top: 0; font-size: 1.2em; color: var(--primary);">📅 Bulk Approve by Date Range</h3>
             <form action="/bulk_approve" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
                 <div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" required></div>
                 <div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" required></div>
-                <button class="btn-success" type="submit" style="height: 45px; padding: 10px 25px; font-size: 1.05em;" onclick="return confirm('Approve ALL pending entries in this date range? You will be marked as the approver.');">Bulk Approve Selected Range</button>
+                
+                <div class="form-group flex-1" style="min-width: 200px;">
+                    <label>Approved By</label>
+                    <select name="approved_by_select" style="border-color: var(--warning); font-weight:bold;">
+                        <option value="">-- Set as Myself ({{ username }}) --</option>
+                        <optgroup label="✅ Allowed Approvers">
+                            {% for u in approvers %}{% if u.can_approve %}<option value="{{ u.username }}">{{ u.username }}</option>{% endif %}{% endfor %}
+                        </optgroup>
+                    </select>
+                </div>
+
+                <button class="btn-success" type="submit" style="height: 45px; padding: 10px 25px; font-size: 1.05em;" onclick="return confirm('Approve ALL pending entries in this date range?');">Bulk Approve Range</button>
             </form>
         </div>
 
         <div class="card" style="padding: 0;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #fef08a; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #92400e;">⏳ Individual Pending Vouchers</h3>
-            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Description / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>
-                {% for t in pending %}<tr>
-                    <td style="padding-left: 20px;"><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                    <td><span class="badge badge-pending">Pending</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
-                    <td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td>
-                    <td style="text-align: center;">
-                        <a href="/approve_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Approve this transaction?');">✅ Approve</a> 
-                        <a href="/reject_voucher/{{ t.link_id }}" class="btn btn-sm btn-danger" onclick="return confirm('Reject & Delete this transaction?');">❌ Reject</a>
-                    </td>
-                </tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No pending vouchers requiring approval.</td></tr>{% endfor %}
-            </table>
+            <h3 style="padding: 15px 20px; margin: 0; background: #fef08a; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #92400e;">☑️ Select & Approve Specific Vouchers</h3>
+            <form action="/bulk_approve_selected" method="POST" onsubmit="return confirm('Approve selected vouchers?');">
+                <div style="padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 15px; align-items: flex-end; background: #fffbeb;">
+                    <div class="form-group" style="margin-bottom: 0; min-width: 200px;">
+                        <label style="color:#92400e;">Set Approved By:</label>
+                        <select name="approved_by_select" style="border-color: var(--warning); font-weight:bold;">
+                            <option value="">-- Set as Myself ({{ username }}) --</option>
+                            <optgroup label="✅ Allowed Approvers">
+                                {% for u in approvers %}{% if u.can_approve %}<option value="{{ u.username }}">{{ u.username }}</option>{% endif %}{% endfor %}
+                            </optgroup>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-success" style="height: 40px; padding: 0 25px;">✅ Approve Selected Entries</button>
+                </div>
+                
+                <table style="width: 100%; border: none;">
+                    <tr>
+                        <th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:18px; height:18px; cursor:pointer;"></th>
+                        <th>Date & Time</th><th>Description / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th>
+                    </tr>
+                    {% for t in pending %}<tr>
+                        <td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:18px; height:18px; cursor:pointer;"></td>
+                        <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
+                        <td><span class="badge badge-pending">Pending</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
+                        <td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td>
+                        <td style="text-align: center;">
+                            <a href="/approve_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Approve this transaction?');">✅</a> 
+                            <a href="/reject_voucher/{{ t.link_id }}" class="btn btn-sm btn-danger" onclick="return confirm('Reject & Delete this transaction?');">❌</a>
+                        </td>
+                    </tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No pending vouchers requiring approval.</td></tr>{% endfor %}
+                </table>
+            </form>
         </div>
     </div>
     <script>document.addEventListener("DOMContentLoaded", function() { setAutoDateTime(); });</script>
@@ -651,7 +682,7 @@ EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BAS
                     <label style="color:#92400e;">⏳ Approval Status <small>(Cashier/Approver Control)</small></label>
                     <select name="status" style="border-color: var(--warning); font-weight:bold;"><option value="pending" {% if entry.status == 'pending' %}selected{% endif %}>⏳ Pending</option><option value="approved" {% if entry.status == 'approved' %}selected{% endif %}>✅ Approved</option></select>
                     <label style="color:#92400e; margin-top:12px;">✅ Approved By <small>(Select who approved this voucher)</small></label>
-                    <select name="approved_by_select" onchange="toggleCustomCategory(this)" style="border-color: var(--warning);"><option value="">-- Not Set --</option><optgroup label="✅ Approvers">{% for u in approvers %}{% if u.can_approve %}<option value="{{ u.username }}" {% if entry.approved_by == u.username %}selected{% endif %}>{{ u.username }}</option>{% endif %}{% endfor %}</optgroup><optgroup label="👤 Other Users">{% for u in approvers %}{% if not u.can_approve %}<option value="{{ u.username }}" {% if entry.approved_by == u.username %}selected{% endif %}>{{ u.username }}</option>{% endif %}{% endfor %}</optgroup><option value="other" {% if entry.approved_by and entry.approved_by not in approver_names %}selected{% endif %}>✏️ Other (Type Name)...</option></select>
+                    <select name="approved_by_select" onchange="toggleCustomCategory(this)" style="border-color: var(--warning);"><option value="">-- Set as Myself ({{ username }}) --</option><optgroup label="✅ Approvers">{% for u in approvers %}{% if u.can_approve %}<option value="{{ u.username }}" {% if entry.approved_by == u.username %}selected{% endif %}>{{ u.username }}</option>{% endif %}{% endfor %}</optgroup><optgroup label="👤 Other Users">{% for u in approvers %}{% if not u.can_approve %}<option value="{{ u.username }}" {% if entry.approved_by == u.username %}selected{% endif %}>{{ u.username }}</option>{% endif %}{% endfor %}</optgroup><option value="other" {% if entry.approved_by and entry.approved_by not in approver_names %}selected{% endif %}>✏️ Other (Type Name)...</option></select>
                     <input type="text" name="approved_by_custom" value="{% if entry.approved_by and entry.approved_by not in approver_names %}{{ entry.approved_by }}{% endif %}" placeholder="Type Approver Name..." style="display:{% if entry.approved_by and entry.approved_by not in approver_names %}block{% else %}none{% endif %}; margin-top: 8px; border-color: var(--primary);">
                 </div>
                 {% endif %}
@@ -1525,9 +1556,14 @@ def add_user():
 @app.route('/approvals')
 def approvals():
     if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
-    pending = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', session['firm_id']).where('status', '==', 'pending').where('deleted', '==', 0).stream()]
+    firm_id = session['firm_id']
+    pending = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', firm_id).where('status', '==', 'pending').where('deleted', '==', 0).stream()]
     pending.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
-    return render_template_string(APPROVALS_TEMPLATE, pending=pending, username=session['username'], active_page='approvals')
+    
+    approvers = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('users').where('firm_id', '==', firm_id).stream()]
+    approvers.sort(key=lambda x: x.get('username', ''))
+    
+    return render_template_string(APPROVALS_TEMPLATE, pending=pending, approvers=approvers, username=session['username'], active_page='approvals')
 
 @app.route('/approve_voucher/<string:link_id>')
 def approve_voucher(link_id):
@@ -1550,6 +1586,7 @@ def bulk_approve():
     if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
     start = request.form.get('start_date', '')
     end = request.form.get('end_date', '')
+    approver = request.form.get('approved_by_select', session['username']) or session['username']
     
     for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
         docs = db.collection(collection).where('user_id', '==', session['firm_id']).where('status', '==', 'pending').where('deleted', '==', 0).stream()
@@ -1557,7 +1594,23 @@ def bulk_approve():
             doc_data = d.to_dict()
             date_val = doc_data.get('date', '')
             if start <= date_val <= end:
-                d.reference.update({'status': 'approved', 'approved_by': session['username']})
+                d.reference.update({'status': 'approved', 'approved_by': approver})
+                
+    return redirect(url_for('approvals'))
+
+@app.route('/bulk_approve_selected', methods=['POST'])
+def bulk_approve_selected():
+    if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
+    selected_links = request.form.getlist('selected_links')
+    if not selected_links: return redirect(url_for('approvals'))
+    
+    approver = request.form.get('approved_by_select', session['username']) or session['username']
+    
+    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+        docs = db.collection(collection).where('user_id', '==', session['firm_id']).where('status', '==', 'pending').where('deleted', '==', 0).stream()
+        for d in docs:
+            if d.to_dict().get('link_id') in selected_links:
+                d.reference.update({'status': 'approved', 'approved_by': approver})
                 
     return redirect(url_for('approvals'))
 
@@ -1583,30 +1636,6 @@ def add_express():
         'deleted': 0,
         'created_at': time.time()
     })
-    return redirect(request.referrer or url_for('index'))
-
-@app.route('/add_transfer', methods=['POST'])
-def add_transfer():
-    if 'user_id' not in session: return redirect(url_for('login'))
-    firm_id = session['firm_id']
-    date_val, time_val, direction, person_id = request.form['date'], request.form['time'], request.form['direction'], request.form['person_id']
-    desc, amt = request.form['description'].strip(), float(request.form['amount'])
-    
-    txn_status = 'pending'
-    approver = ''
-    
-    person_doc = db.collection('persons').document(person_id).get()
-    if not person_doc.exists: return redirect(request.referrer)
-    person_name = person_doc.to_dict().get('name', '')
-    link_id = uuid.uuid4().hex[:12]
-    
-    if direction == 'main_to_person':
-        db.collection('transactions').add({'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Transfer to {person_name}: {desc}", 'type': 'dasti_out', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
-        db.collection('person_ledger').add({'user_id': firm_id, 'person_id': person_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Rcvd from Main: {desc}", 'type': 'advance', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
-    else:
-        db.collection('person_ledger').add({'user_id': firm_id, 'person_id': person_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Paid to Main: {desc}", 'type': 'settlement', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
-        db.collection('transactions').add({'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Transfer from {person_name}: {desc}", 'type': 'income', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
-                  
     return redirect(request.referrer or url_for('index'))
 
 @app.route('/add_batch_unified', methods=['POST'])

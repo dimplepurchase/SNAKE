@@ -193,7 +193,7 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
     body { background-color: #111; color: #0f0; font-family: monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; flex-direction: column; transition: background 0.5s ease; touch-action: none; }
-    .hud { display: flex; justify-content: space-between; width: 400px; max-width: 95vw; margin-bottom: 10px; font-size: 1.2em; font-weight: bold; }
+    .hud { display: flex; justify-content: space-between; align-items: center; width: 400px; max-width: 95vw; margin-bottom: 10px; font-size: 1.2em; font-weight: bold; }
     canvas { border: 2px solid #333; background-color: #000; box-shadow: 0 0 15px rgba(0, 255, 0, 0.2); max-width: 95vw; max-height: 50vh; }
     #login-container { display: none; position: absolute; z-index: 10; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); font-family: 'Poppins', sans-serif; color: #333; width: 350px; max-width: 90vw; }
     h2 { color: #4f46e5; margin-top: 0; text-align: center; }
@@ -218,6 +218,11 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
     <div id="game-wrapper">
         <div class="hud">
             <div id="timeDisplay">Time: 0s</div>
+            <select id="speedCtrl" onchange="speedThreshold = parseInt(this.value)" style="background: #111; color: #0f0; border: 1px solid #0f0; border-radius: 4px; font-family: monospace; font-size: 0.8em; outline: none; padding: 2px;">
+                <option value="15">Slow</option>
+                <option value="10" selected>Normal</option>
+                <option value="5">Fast</option>
+            </select>
             <div id="scoreDisplay">Score: 0</div>
         </div>
         <canvas id="gameCanvas" width="400" height="400"></canvas>
@@ -244,6 +249,7 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
         const ctx = canvas.getContext('2d');
         const grid = 20;
         let count = 0;
+        let speedThreshold = 10; // Default slower speed
         let snake = { x: 160, y: 160, dx: grid, dy: 0, cells: [], maxCells: 4 };
         let apple = { x: 320, y: 320 };
         
@@ -263,7 +269,7 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
         function loop() {
             if (isGameOver) return; 
             requestAnimationFrame(loop);
-            if (++count < 6) return;
+            if (++count < speedThreshold) return;
             count = 0;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -273,10 +279,17 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
             snake.x += snake.dx;
             snake.y += snake.dy;
 
-            // Wall Collision = Game Over & Permadeath (Must refresh)
-            if (snake.x < 0 || snake.x >= canvas.width || snake.y < 0 || snake.y >= canvas.height) {
-                triggerGameOver();
-                return;
+            // WRAP AROUND (No Wall Death)
+            if (snake.x < 0) {
+                snake.x = canvas.width - grid;
+            } else if (snake.x >= canvas.width) {
+                snake.x = 0;
+            }
+            
+            if (snake.y < 0) {
+                snake.y = canvas.height - grid;
+            } else if (snake.y >= canvas.height) {
+                snake.y = 0;
             }
 
             snake.cells.unshift({ x: snake.x, y: snake.y });
@@ -309,7 +322,7 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
                     apple.y = getRandomInt(0, 20) * grid;
                 }
                 
-                // Tail Collision = Game Over
+                // Tail Collision = Game Over Permadeath
                 for (let i = index + 1; i < snake.cells.length; i++) {
                     if (cell.x === snake.cells[i].x && cell.y === snake.cells[i].y) {
                         triggerGameOver();
@@ -991,7 +1004,7 @@ def index():
     expenses = [t for t in all_txns if t.get('type') in ('expense', 'batch_ledger_out')]
     
     incomes.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
-    expenses.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)))
+    expenses.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0))) 
     
     total_in_actual = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in') and t.get('status') == 'approved')
     total_out_actual = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out') and t.get('status') == 'approved')
@@ -1547,7 +1560,6 @@ def bulk_approve():
 def add_express():
     if 'user_id' not in session: return redirect(url_for('login'))
     
-    # EVERY entry goes to pending by default
     txn_status = 'pending'
     approver = ''
     
@@ -1568,31 +1580,6 @@ def add_express():
     })
     return redirect(request.referrer or url_for('index'))
 
-@app.route('/add_transfer', methods=['POST'])
-def add_transfer():
-    if 'user_id' not in session: return redirect(url_for('login'))
-    firm_id = session['firm_id']
-    date_val, time_val, direction, person_id = request.form['date'], request.form['time'], request.form['direction'], request.form['person_id']
-    desc, amt = request.form['description'].strip(), float(request.form['amount'])
-    
-    # EVERY entry goes to pending by default
-    txn_status = 'pending'
-    approver = ''
-    
-    person_doc = db.collection('persons').document(person_id).get()
-    if not person_doc.exists: return redirect(request.referrer)
-    person_name = person_doc.to_dict().get('name', '')
-    link_id = uuid.uuid4().hex[:12]
-    
-    if direction == 'main_to_person':
-        db.collection('transactions').add({'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Transfer to {person_name}: {desc}", 'type': 'dasti_out', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
-        db.collection('person_ledger').add({'user_id': firm_id, 'person_id': person_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Rcvd from Main: {desc}", 'type': 'advance', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
-    else:
-        db.collection('person_ledger').add({'user_id': firm_id, 'person_id': person_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Paid to Main: {desc}", 'type': 'settlement', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
-        db.collection('transactions').add({'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': 'Cash', 'category': 'General', 'description': f"Transfer from {person_name}: {desc}", 'type': 'income', 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()})
-                  
-    return redirect(request.referrer or url_for('index'))
-
 @app.route('/add_batch_unified', methods=['POST'])
 def add_batch_unified():
     if 'user_id' not in session: return redirect(url_for('login'))
@@ -1603,7 +1590,6 @@ def add_batch_unified():
     
     cats, cust_cats, descs, amts = request.form.getlist('category[]'), request.form.getlist('custom_category[]'), request.form.getlist('description[]'), request.form.getlist('amount[]')
     
-    # EVERY entry goes to pending by default
     txn_status = 'pending'
     approver = ''
     
@@ -1687,13 +1673,11 @@ def login():
                 session['firm_id'] = user.get('firm_id', user_doc.id)
                 session['role'] = user.get('role', 'superadmin')
                 
-                # Apply granular RBAC rights to the session
                 session['can_approve'] = user.get('can_approve', 0)
                 session['can_edit'] = user.get('can_edit', 0)
                 session['can_view_reports'] = user.get('can_view_reports', 0)
                 session['can_view_trash'] = user.get('can_view_trash', 0)
                 
-                # Superadmin override
                 if session['role'] == 'superadmin':
                     session['can_approve'] = session['can_edit'] = session['can_view_reports'] = session['can_view_trash'] = 1
                     
@@ -1755,5 +1739,4 @@ def register():
 def logout(): session.clear(); return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    # No local server startup for Vercel deployment
     pass

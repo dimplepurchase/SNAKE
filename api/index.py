@@ -93,6 +93,12 @@ BASE_STYLE = '''
         const timeString = now.toTimeString().slice(0,5);
         document.querySelectorAll('input[type="date"]').forEach(el => { if(!el.value) el.value = dateString; });
         document.querySelectorAll('input[type="time"]').forEach(el => { if(!el.value) el.value = timeString; });
+        
+        // Auto-punch date and time for hidden Express and Transfer inputs
+        if(document.getElementById('express_date')) document.getElementById('express_date').value = dateString;
+        if(document.getElementById('express_time')) document.getElementById('express_time').value = timeString;
+        if(document.getElementById('transfer_date')) document.getElementById('transfer_date').value = dateString;
+        if(document.getElementById('transfer_time')) document.getElementById('transfer_time').value = timeString;
     }
     function toggleNature() {
         const nature = document.getElementById('txn_nature')?.value;
@@ -162,12 +168,14 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print">
     <a href="/reports" class="{% if active_page == 'reports' %}active{% endif %}" style="background: rgba(16, 185, 129, 0.2); color: #065f46;">📊 Reports</a>
     {% if session.get('can_approve') == 1 %}<a href="/approvals" class="{% if active_page == 'approvals' %}active{% endif %}" style="background: var(--warning);">✅ Apprv</a>{% endif %}
     <a href="/trash" class="{% if active_page == 'trash' %}active{% endif %}" style="background: rgba(239, 68, 68, 0.2); color: #991b1b;">🗑️ Trash</a>
-    {% if session.get('role') == 'superadmin' %}<a href="/manage_users" class="{% if active_page == 'users' %}active{% endif %}" style="background: #8b5cf6;">⚙️ Users</a>{% endif %}
+    {% if session.get('role') == 'superadmin' %}
+        <a href="/manage_users" class="{% if active_page == 'users' %}active{% endif %}" style="background: #8b5cf6;">⚙️ Users</a>
+        <a href="/download_cash_json" style="background: #f97316; color: white;">🔥 Get cash.json</a>
+    {% endif %}
     <span style="color: rgba(255,255,255,0.9); margin-left: auto; font-size: 0.9em; font-weight: 500;">User: <strong>{{ username }}</strong> <small>({{ session.get('role')|title }})</small></span>
     <a href="/logout" class="logout" style="padding: 6px 12px; font-size:0.9em;" onclick="sessionStorage.removeItem('splashShown');">Logout</a>
 </div>'''
 
-# Other template blocks omitted for space (Keep your exact templates from previous messages)
 REGISTER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Setup</title>''' + BASE_STYLE + '''</head><body><div class="container"><div class="card" style="max-width: 450px; margin: 80px auto; text-align: center;"><h2 style="color: var(--primary);">Setup Superadmin</h2><form action="/register" method="POST" style="text-align: left;"><div class="form-group"><label>Firm Name</label><input type="text" name="firm_name" required></div><div class="form-group"><label>Opening Cash Book Balance (₹)</label><input type="number" step="0.01" min="0" name="opening_balance" value="0" required></div><div class="form-group"><label>Superadmin Username</label><input type="text" name="username" required></div><div class="form-group"><label>Password</label><input type="password" name="password" required></div><button type="submit" style="width: 100%;">Initialize Firm Account</button></form></div></div></body></html>'''
 LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>Login</title>''' + BASE_STYLE + '''</head><body><div class="container"><div class="card" style="max-width: 400px; margin: 100px auto; text-align: center;"><h2>Welcome Back</h2><form action="/login" method="POST" style="text-align: left;"><div class="form-group"><label>Username</label><input type="text" name="username" required></div><div class="form-group"><label>Password</label><input type="password" name="password" required></div><button type="submit" style="width: 100%;">Secure Login</button></form></div></div></body></html>'''
 TRASH_TEMPLATE = '''<!DOCTYPE html><html><head><title>Trash</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #fee2e2; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #991b1b;">🗑️ Deleted Vouchers & Entries (Trash)</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Category / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>{% for t in trashed %}<tr><td style="padding-left: 20px;"><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td><td><span class="badge badge-mode">{{ t.category }}</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td><td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td><td style="text-align: center;"><a href="/restore_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Restore this transaction?');">♻️ Restore</a><a href="/hard_delete_voucher/{{ t.link_id }}" class="btn btn-sm" style="background:#dc2626; color:white; margin-left:5px;" onclick="return confirm('Permanently delete? This cannot be undone.');">🔥 Delete Forever</a></td></tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">Trash is empty.</td></tr>{% endfor %}</table></div></div></body></html>'''
@@ -452,6 +460,7 @@ def reports():
     
     raw_results = [doc.to_dict() for doc in query.stream()]
     
+    # Filter in Python
     results = []
     for r in raw_results:
         if start_date and r.get('date', '') < start_date: continue
@@ -533,7 +542,6 @@ def edit_entry(table_name, row_id):
     entry = {'id': row_id, **doc_data}
     link_id = entry.get('link_id', '')
 
-    # Find every record sharing this voucher's link_id (a voucher can touch 1-2 collections)
     linked_docs = {}
     if link_id:
         for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
@@ -545,7 +553,6 @@ def edit_entry(table_name, row_id):
     person_doc = linked_docs.get('person_ledger')
     dasti_doc = linked_docs.get('dasti_ledger')
 
-    # Work out which account this voucher currently posts to, so the edit form can preselect it
     if person_doc:
         current_account_type, current_primary_id = 'person', person_doc[1].get('person_id', '')
     elif dasti_doc:
@@ -553,7 +560,6 @@ def edit_entry(table_name, row_id):
     else:
         current_account_type, current_primary_id = 'main', ''
 
-    # Work out the current "nature" (slip_in / advance / receive_cash) from the linked transactions type
     nature_map = {
         'expense': 'slip_in', 'batch_ledger_out': 'slip_in', 'settlement': 'slip_in',
         'dasti_out': 'advance', 'dasti_voucher_out': 'advance', 'advance': 'advance',
@@ -573,7 +579,6 @@ def edit_entry(table_name, row_id):
     approver_names = [u.get('username', '') for u in approvers]
 
     if request.method == 'POST':
-        # Category: support dropdown selection + "Other" custom typed category
         cat_raw = request.form.get('category', entry.get('category', ''))
         custom_cat = request.form.get('custom_category', '').strip()
         category = custom_cat if cat_raw == 'Other' and custom_cat else cat_raw
@@ -587,7 +592,6 @@ def edit_entry(table_name, row_id):
         amount = float(request.form['amount'])
         desc = request.form.get('description', entry.get('description', '')).strip()
 
-        # Approval status + WHO approved it (selected by name, not just free text)
         new_status = request.form.get('status', entry.get('status'))
         approver_select = request.form.get('approved_by_select', '')
         approver_custom = request.form.get('approved_by_custom', '').strip()
@@ -607,7 +611,6 @@ def edit_entry(table_name, row_id):
             approved_by = entry.get('approved_by', '')
 
         if has_link:
-            # Voucher correction: allow re-targeting which account/person it posts to and its nature
             new_account_raw = request.form.get('primary_account', 'main')
             new_account_name = request.form.get('new_account_name', '').strip()
             new_nature = request.form.get('txn_nature', current_nature)
@@ -639,7 +642,6 @@ def edit_entry(table_name, row_id):
                 'deleted': entry.get('deleted', 0), 'created_at': entry.get('created_at', time.time())
             }
 
-            # Remove the old linked record(s); they'll be recreated to reflect the corrected account/nature
             for coll, (did, _d) in linked_docs.items():
                 db.collection(coll).document(did).delete()
 
@@ -667,7 +669,6 @@ def edit_entry(table_name, row_id):
                     db.collection('dasti_ledger').add({**base_txn, 'dasti_person_id': new_primary_id, 'description': desc, 'type': 'settlement'})
                     db.collection('transactions').add({**base_txn, 'description': f"Dasti In ({new_person_name}): {desc}", 'type': 'dasti_voucher_in'})
         else:
-            # Simple standalone entry (e.g. Express entry) with no other linked records
             update_data = {
                 'date': date_val, 'time': time_val, 'payment_mode': mode, 'category': category,
                 'amount': amount, 'status': new_status, 'approved_by': approved_by,
@@ -956,5 +957,5 @@ def download_cash_json():
 def logout(): session.clear(); return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    # (Removed webbrowser launch logic since this runs on a cloud server)
+    # No local server startup for Vercel deployment
     pass

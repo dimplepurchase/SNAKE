@@ -93,6 +93,11 @@ BASE_STYLE = '''
         const timeString = now.toTimeString().slice(0,5);
         document.querySelectorAll('input[type="date"]').forEach(el => { if(!el.value) el.value = dateString; });
         document.querySelectorAll('input[type="time"]').forEach(el => { if(!el.value) el.value = timeString; });
+        
+        if(document.getElementById('express_date')) document.getElementById('express_date').value = dateString;
+        if(document.getElementById('express_time')) document.getElementById('express_time').value = timeString;
+        if(document.getElementById('transfer_date')) document.getElementById('transfer_date').value = dateString;
+        if(document.getElementById('transfer_time')) document.getElementById('transfer_time').value = timeString;
     }
     function toggleNature() {
         const nature = document.getElementById('txn_nature')?.value;
@@ -182,25 +187,47 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print">
 
 REGISTER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Setup</title>''' + BASE_STYLE + '''</head><body><div class="container"><div class="card" style="max-width: 450px; margin: 80px auto; text-align: center;"><h2 style="color: var(--primary);">Setup Superadmin</h2><form action="/register" method="POST" style="text-align: left;"><div class="form-group"><label>Firm Name</label><input type="text" name="firm_name" required></div><div class="form-group"><label>Opening Cash Book Balance (₹)</label><input type="number" step="0.01" min="0" name="opening_balance" value="0" required></div><div class="form-group"><label>Superadmin Username</label><input type="text" name="username" required></div><div class="form-group"><label>Password</label><input type="password" name="password" required></div><button type="submit" style="width: 100%;">Initialize Firm Account</button></form></div></div></body></html>'''
 
-# SECRET SNAKE GAME GATEWAY INSTEAD OF NORMAL LOGIN
+# --- THE SECRET SNAKE GAME LOGIN GATEWAY ---
 LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-    body { background-color: #111; color: #0f0; font-family: monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; flex-direction: column; transition: background 0.5s ease; }
-    canvas { border: 2px solid #333; background-color: #000; box-shadow: 0 0 15px rgba(0, 255, 0, 0.2); }
-    #login-container { display: none; position: absolute; z-index: 10; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); font-family: 'Poppins', sans-serif; color: #333; width: 350px; }
+    body { background-color: #111; color: #0f0; font-family: monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; flex-direction: column; transition: background 0.5s ease; touch-action: none; }
+    .hud { display: flex; justify-content: space-between; width: 400px; max-width: 95vw; margin-bottom: 10px; font-size: 1.2em; font-weight: bold; }
+    canvas { border: 2px solid #333; background-color: #000; box-shadow: 0 0 15px rgba(0, 255, 0, 0.2); max-width: 95vw; max-height: 50vh; }
+    #login-container { display: none; position: absolute; z-index: 10; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); font-family: 'Poppins', sans-serif; color: #333; width: 350px; max-width: 90vw; }
     h2 { color: #4f46e5; margin-top: 0; text-align: center; }
     .form-group { margin-bottom: 15px; display: flex; flex-direction: column; }
     label { font-weight: 600; margin-bottom: 5px; font-size: 0.85em; color: #4b5563; }
     input { padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1em; }
     button { background: #4f46e5; color: white; border: none; padding: 10px; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 10px; width: 100%; font-size: 1em;}
     button:hover { background: #4338ca; }
-    .instructions { margin-bottom: 10px; text-align: center; opacity: 0.7; }
+    
+    /* Mobile Controls */
+    .controls { display: none; grid-template-columns: 60px 60px 60px; grid-template-rows: 60px 60px; gap: 10px; margin-top: 20px; justify-content: center; }
+    .btn-ctrl { background: rgba(0, 255, 0, 0.2); border: 2px solid #0f0; color: #0f0; border-radius: 8px; font-size: 1.5em; display: flex; justify-content: center; align-items: center; user-select: none; }
+    .btn-ctrl:active { background: rgba(0, 255, 0, 0.5); }
+    .btn-up { grid-column: 2; grid-row: 1; }
+    .btn-left { grid-column: 1; grid-row: 2; }
+    .btn-down { grid-column: 2; grid-row: 2; }
+    .btn-right { grid-column: 3; grid-row: 2; }
+    @media (max-width: 768px) { .controls { display: grid; } }
+    #game-over-msg { display: none; color: red; text-align: center; margin-top: 20px; font-size: 1.2em; font-family: 'Poppins', sans-serif; font-weight: bold; }
 </style>
 </head><body>
     <div id="game-wrapper">
-        <div class="instructions">Use Arrow Keys.<br><small>Target: Bottom-Right Corner</small></div>
+        <div class="hud">
+            <div id="timeDisplay">Time: 0s</div>
+            <div id="scoreDisplay">Score: 0</div>
+        </div>
         <canvas id="gameCanvas" width="400" height="400"></canvas>
+        <div id="game-over-msg">Game Over.<br>Refresh page to restart.</div>
+        <div class="controls">
+            <div class="btn-ctrl btn-up" id="btnUp">▲</div>
+            <div class="btn-ctrl btn-left" id="btnLeft">◀</div>
+            <div class="btn-ctrl btn-down" id="btnDown">▼</div>
+            <div class="btn-ctrl btn-right" id="btnRight">▶</div>
+        </div>
     </div>
 
     <div id="login-container">
@@ -219,23 +246,38 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
         let count = 0;
         let snake = { x: 160, y: 160, dx: grid, dy: 0, cells: [], maxCells: 4 };
         let apple = { x: 320, y: 320 };
+        
+        let score = 0;
+        let startTime = Math.floor(Date.now() / 1000);
+        let isGameOver = false;
+        let loginUnlocked = false;
+        let loginLockedForever = false;
 
         function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min)) + min; }
 
+        function triggerGameOver() {
+            isGameOver = true;
+            document.getElementById('game-over-msg').style.display = 'block';
+        }
+
         function loop() {
+            if (isGameOver) return; 
             requestAnimationFrame(loop);
             if (++count < 6) return;
             count = 0;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+            // Update Time
+            document.getElementById('timeDisplay').innerText = 'Time: ' + (Math.floor(Date.now() / 1000) - startTime) + 's';
+
             snake.x += snake.dx;
             snake.y += snake.dy;
 
-            // Wrap around
-            if (snake.x < 0) snake.x = canvas.width - grid;
-            else if (snake.x >= canvas.width) snake.x = 0;
-            if (snake.y < 0) snake.y = canvas.height - grid;
-            else if (snake.y >= canvas.height) snake.y = 0;
+            // Wall Collision = Game Over & Permadeath (Must refresh)
+            if (snake.x < 0 || snake.x >= canvas.width || snake.y < 0 || snake.y >= canvas.height) {
+                triggerGameOver();
+                return;
+            }
 
             snake.cells.unshift({ x: snake.x, y: snake.y });
             if (snake.cells.length > snake.maxCells) snake.cells.pop();
@@ -248,33 +290,71 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
             ctx.fillStyle = '#0f0';
             snake.cells.forEach(function(cell, index) {
                 ctx.fillRect(cell.x, cell.y, grid - 1, grid - 1);
+                
+                // Eat Apple
                 if (cell.x === apple.x && cell.y === apple.y) {
                     snake.maxCells++;
+                    score++;
+                    document.getElementById('scoreDisplay').innerText = 'Score: ' + score;
+                    
+                    // SECURITY LOCK LOGIC
+                    if (score === 4) {
+                        loginUnlocked = true;
+                    } else if (score === 5) {
+                        loginUnlocked = false;
+                        loginLockedForever = true;
+                    }
+
                     apple.x = getRandomInt(0, 20) * grid;
                     apple.y = getRandomInt(0, 20) * grid;
                 }
+                
+                // Tail Collision = Game Over
                 for (let i = index + 1; i < snake.cells.length; i++) {
                     if (cell.x === snake.cells[i].x && cell.y === snake.cells[i].y) {
-                        snake.x = 160; snake.y = 160; snake.cells = []; snake.maxCells = 4; snake.dx = grid; snake.dy = 0;
-                        apple.x = getRandomInt(0, 20) * grid; apple.y = getRandomInt(0, 20) * grid;
+                        triggerGameOver();
+                        return;
                     }
                 }
             });
 
             // CHECK BOTTOM RIGHT CORNER GATEWAY
             if (snake.x === canvas.width - grid && snake.y === canvas.height - grid) {
-                document.getElementById('game-wrapper').style.display = 'none';
-                document.getElementById('login-container').style.display = 'block';
-                document.body.style.background = '#f8fafc';
+                if (loginUnlocked && !loginLockedForever) {
+                    isGameOver = true;
+                    document.getElementById('game-wrapper').style.display = 'none';
+                    document.getElementById('login-container').style.display = 'block';
+                    document.body.style.background = '#f8fafc';
+                }
             }
         }
 
+        // Controls
+        function setDir(dx, dy) {
+            if(isGameOver) return;
+            if (dx !== 0 && snake.dx === 0) { snake.dx = dx; snake.dy = dy; }
+            else if (dy !== 0 && snake.dy === 0) { snake.dy = dy; snake.dx = dx; }
+        }
+
         document.addEventListener('keydown', function(e) {
-            if (e.which === 37 && snake.dx === 0) { snake.dx = -grid; snake.dy = 0; }
-            else if (e.which === 38 && snake.dy === 0) { snake.dy = -grid; snake.dx = 0; }
-            else if (e.which === 39 && snake.dx === 0) { snake.dx = grid; snake.dy = 0; }
-            else if (e.which === 40 && snake.dy === 0) { snake.dy = grid; snake.dx = 0; }
+            if (e.which === 37) setDir(-grid, 0);
+            else if (e.which === 38) setDir(0, -grid);
+            else if (e.which === 39) setDir(grid, 0);
+            else if (e.which === 40) setDir(0, grid);
         });
+
+        // Mobile Controls
+        document.getElementById('btnUp').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, -grid); });
+        document.getElementById('btnDown').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, grid); });
+        document.getElementById('btnLeft').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(-grid, 0); });
+        document.getElementById('btnRight').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(grid, 0); });
+        
+        // Mouse fallbacks for testing mobile view on desktop
+        document.getElementById('btnUp').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(0, -grid); });
+        document.getElementById('btnDown').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(0, grid); });
+        document.getElementById('btnLeft').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(-grid, 0); });
+        document.getElementById('btnRight').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(grid, 0); });
+
         requestAnimationFrame(loop);
     </script>
 </body></html>'''
@@ -852,7 +932,7 @@ DASTI_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Account: {{ 
         <div class="stats-grid">
             <div class="stat-card" style="border-top: 4px solid #0ea5e9;"><h4>Total Advances (Given Out)</h4><div class="value" style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(advances) }}</div></div>
             <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Slips / Settlements</h4><div class="value" style="color: var(--success);">- ₹{{ "{:,.2f}".format(settlements) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div>
+            <div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %}<span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div>
         </div>
         <div class="card" style="padding: 0; overflow-x: auto;">
             <h3 style="padding: 18px 25px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border);">Detailed Transaction History</h3>
@@ -890,7 +970,6 @@ def get_categories(firm_id):
     docs = db.collection('categories').where('firm_id', '==', firm_id).stream()
     custom = [doc.to_dict().get('name') for doc in docs]
     return ['General', 'Sales', 'Purchase', 'Salary', 'Transport'] + custom
-
 
 # --- ROUTES ---
 

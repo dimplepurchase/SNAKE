@@ -344,12 +344,6 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
             snake.cells.unshift({ x: snake.x, y: snake.y });
             if (snake.cells.length > snake.maxCells) snake.cells.pop();
 
-            // Draw Unlock Gateway if activated
-            if (loginUnlocked && !loginLockedForever) {
-                ctx.fillStyle = 'rgba(79, 70, 229, 0.6)';
-                ctx.fillRect(targetX, targetY, grid, grid);
-            }
-
             ctx.fillStyle = 'red';
             ctx.fillRect(apple.x, apple.y, grid - 1, grid - 1);
 
@@ -611,6 +605,7 @@ APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Approvals Dashboard</t
             <button class="btn btn-outline" id="tab-approved-btn" onclick="toggleTab('approved')" style="flex:1; background:#fff;">✅ Approved History</button>
         </div>
 
+        <!-- PENDING SECTION -->
         <div id="section-pending">
             <div class="card" style="margin-bottom: 20px;">
                 <h3 style="margin-top: 0; font-size: 1.2em; color: var(--primary);">📅 Bulk Approve by Date Range</h3>
@@ -666,6 +661,7 @@ APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Approvals Dashboard</t
             </div>
         </div>
 
+        <!-- APPROVED SECTION -->
         <div id="section-approved" style="display: none;">
             <div class="card" style="padding: 0;">
                 <h3 style="padding: 15px 20px; margin: 0; background: #d1fae5; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #065f46;">✅ Recently Approved Vouchers</h3>
@@ -1805,24 +1801,19 @@ def approvals():
     if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
     firm_id = session['firm_id']
     
-    # 1. Fetch Pending (Unchanged)
     pending = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', firm_id).where('status', '==', 'pending').where('deleted', '==', 0).stream()]
     pending.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
     
-    # 2. Fetch Approved (FIXED: Firebase Composite Index Bypass)
-    # We remove .order_by() and .limit() from the database call to prevent the 500 Error
     approved_stream = db.collection('transactions').where('user_id', '==', firm_id).where('status', '==', 'approved').where('deleted', '==', 0).stream()
     approved = [{'id': doc.id, **doc.to_dict()} for doc in approved_stream]
-    
-    # Sort and slice the data in Python instead of Firebase
     approved.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
-    approved = approved[:100] # Limit to the latest 100 entries
+    approved = approved[:100]
     
-    # 3. Fetch Approvers
     approvers = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('users').where('firm_id', '==', firm_id).stream()]
     approvers.sort(key=lambda x: x.get('username', ''))
     
     return render_template_string(APPROVALS_TEMPLATE, pending=pending, approved=approved, approvers=approvers, username=session['username'], active_page='approvals')
+
 @app.route('/approve_voucher/<string:link_id>')
 def approve_voucher(link_id):
     if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))

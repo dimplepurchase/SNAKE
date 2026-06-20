@@ -1805,17 +1805,24 @@ def approvals():
     if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
     firm_id = session['firm_id']
     
+    # 1. Fetch Pending (Unchanged)
     pending = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', firm_id).where('status', '==', 'pending').where('deleted', '==', 0).stream()]
     pending.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
     
-    approved = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', firm_id).where('status', '==', 'approved').where('deleted', '==', 0).order_by('created_at', direction=firestore.Query.DESCENDING).limit(100).stream()]
-    approved.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
+    # 2. Fetch Approved (FIXED: Firebase Composite Index Bypass)
+    # We remove .order_by() and .limit() from the database call to prevent the 500 Error
+    approved_stream = db.collection('transactions').where('user_id', '==', firm_id).where('status', '==', 'approved').where('deleted', '==', 0).stream()
+    approved = [{'id': doc.id, **doc.to_dict()} for doc in approved_stream]
     
+    # Sort and slice the data in Python instead of Firebase
+    approved.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
+    approved = approved[:100] # Limit to the latest 100 entries
+    
+    # 3. Fetch Approvers
     approvers = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('users').where('firm_id', '==', firm_id).stream()]
     approvers.sort(key=lambda x: x.get('username', ''))
     
     return render_template_string(APPROVALS_TEMPLATE, pending=pending, approved=approved, approvers=approvers, username=session['username'], active_page='approvals')
-
 @app.route('/approve_voucher/<string:link_id>')
 def approve_voucher(link_id):
     if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))

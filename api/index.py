@@ -1,7 +1,6 @@
 import os
 import json
 from flask import Flask, render_template_string, request, redirect, url_for, session, Response
-from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 import time, uuid, csv
 from io import StringIO
@@ -293,7 +292,6 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
         const ctx = canvas.getContext('2d');
         const grid = 20;
         
-        // Timer based speed ensures perfect cross-device consistency (120hz vs 60hz fix)
         let speedMod = parseInt("{{ settings.game_speed }}") || 0;
         let delayMs = 100 - (speedMod * 10);
         if (delayMs < 20) delayMs = 20;
@@ -605,7 +603,6 @@ APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Approvals Dashboard</t
             <button class="btn btn-outline" id="tab-approved-btn" onclick="toggleTab('approved')" style="flex:1; background:#fff;">✅ Approved History</button>
         </div>
 
-        <!-- PENDING SECTION -->
         <div id="section-pending">
             <div class="card" style="margin-bottom: 20px;">
                 <h3 style="margin-top: 0; font-size: 1.2em; color: var(--primary);">📅 Bulk Approve by Date Range</h3>
@@ -661,7 +658,6 @@ APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Approvals Dashboard</t
             </div>
         </div>
 
-        <!-- APPROVED SECTION -->
         <div id="section-approved" style="display: none;">
             <div class="card" style="padding: 0;">
                 <h3 style="padding: 15px 20px; margin: 0; background: #d1fae5; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #065f46;">✅ Recently Approved Vouchers</h3>
@@ -1765,7 +1761,7 @@ def edit_user(uid):
             'idle_timeout_minutes': int(request.form.get('idle_timeout', 15))
         }
         new_pw = request.form.get('password', '').strip()
-        if new_pw: update_data['password'] = generate_password_hash(new_pw.lower())
+        if new_pw: update_data['password'] = new_pw.lower()
         
         doc_ref.update(update_data)
         return redirect(url_for('manage_users'))
@@ -1783,7 +1779,7 @@ def add_user():
     db.collection('users').add({
         'username': username_raw,
         'username_lower': username_raw.lower(),
-        'password': generate_password_hash(password_raw),
+        'password': password_raw,
         'firm_name': session['firm_name'],
         'firm_id': session['firm_id'],
         'role': request.form['role'],
@@ -1976,7 +1972,7 @@ def login():
         
         if user_doc:
             user = user_doc.to_dict()
-            if check_password_hash(user['password'], password_lower):
+            if user.get('password') == password_lower:
                 session['user_id'] = user_doc.id
                 session['username'] = user['username']
                 session['firm_name'] = user['firm_name']
@@ -2017,7 +2013,7 @@ def register():
         new_user_ref.set({
             'username': username_raw,
             'username_lower': username_raw.lower(),
-            'password': generate_password_hash(password_raw),
+            'password': password_raw,
             'firm_name': request.form['firm_name'],
             'firm_id': user_id,
             'role': 'superadmin',

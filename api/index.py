@@ -40,8 +40,24 @@ def get_global_settings():
         'game_enabled': 1,
         'blocks_to_eat': 4,
         'unlock_corner': 'br', 
-        'game_speed': 0 
+        'game_speed': 0,
+        'app_disabled': False,
+        'require_delete_confirm': True,
+        'balance_display_mode': 'both',
+        'receipt_display_mode': 'strict',
+        'edit_action_mode': 'button',
+        'report_flag_mode': 'both',
+        'report_pdf_format': 'standard'
     }
+
+# --- KILL SWITCH INTERCEPTOR ---
+@app.before_request
+def check_lockdown():
+    if request.endpoint not in ['login', 'demo_game', 'static', 'register']:
+        settings = get_global_settings()
+        if settings.get('app_disabled', False):
+            session.clear()
+            return redirect(url_for('login'))
 
 # --- HTML TEMPLATES & CSS ---
 
@@ -81,13 +97,10 @@ BASE_STYLE = '''
     .badge { padding: 4px 10px; border-radius: 999px; font-weight: 600; font-size: 0.8em; display: inline-block; }
     .badge-in { background-color: var(--success-bg); color: var(--success-text); }
     .badge-out { background-color: var(--danger-bg); color: var(--danger-text); }
-    .badge-memo { background-color: #e5e7eb; color: #374151; border: 1px solid #d1d5db; }
     .badge-pending { background-color: #fef08a; color: #92400e; border: 1px solid #fde047; }
     .badge-mode { background-color: #e0e7ff; color: #3730a3; font-size: 0.8em; margin-bottom: 4px; border: 1px solid #c7d2fe; }
     .flex-row { display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end; }
     .flex-1 { flex: 1; }
-    .express-entry { background: #e0e7ff; border: 2px solid #818cf8; padding: 20px; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-    .transfer-entry { background: #e0f2fe; border: 2px solid #38bdf8; padding: 20px; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 25px; }
     .stat-card { background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--border); text-align: center; }
     .stat-card h4 { color: #6b7280; margin: 0 0 8px 0; font-size: 0.85em; text-transform: uppercase; }
@@ -98,7 +111,7 @@ BASE_STYLE = '''
     .splash-user { font-size: 1.5em; font-weight: 300; animation: popIn 1.2s ease; }
     @keyframes popIn { 0% { opacity: 0; transform: translateY(20px); } 100% { opacity: 1; transform: translateY(0); } }
     
-    @media print { .no-print, .navbar, .card form, .express-entry, .transfer-entry, button, select { display: none !important; } body { background: white; color: black; } .card { box-shadow: none; border: none; margin: 0; padding: 0; } }
+    @media print { .no-print, .navbar, .card form, button, select { display: none !important; } body { background: white; color: black; } .card { box-shadow: none; border: none; margin: 0; padding: 0; } }
 </style>
 <script>
     let isDirty = false;
@@ -108,7 +121,6 @@ BASE_STYLE = '''
         const timeString = now.toTimeString().slice(0,5);
         document.querySelectorAll('input[type="date"]').forEach(el => { if(!el.value) el.value = dateString; });
         document.querySelectorAll('input[type="time"]').forEach(el => { if(!el.value) el.value = timeString; });
-        
         if(document.getElementById('express_date')) document.getElementById('express_date').value = dateString;
         if(document.getElementById('express_time')) document.getElementById('express_time').value = timeString;
     }
@@ -186,6 +198,11 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print">
     <a href="/approvals" class="{% if active_page == 'approvals' %}active{% endif %}" style="background: var(--warning);">✅ Apprv</a>
     {% endif %}
     
+    {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
+    <a href="/flag_entries" class="{% if active_page == 'flags' %}active{% endif %}" style="background: rgba(245, 158, 11, 0.2); color: #d97706;">🚩 Flags</a>
+    <a href="/logs" class="{% if active_page == 'logs' %}active{% endif %}" style="background: rgba(99, 102, 241, 0.2); color: #4338ca;">📝 Logs</a>
+    {% endif %}
+
     {% if session.get('can_view_trash') == 1 or session.get('role') == 'superadmin' %}
     <a href="/trash" class="{% if active_page == 'trash' %}active{% endif %}" style="background: rgba(239, 68, 68, 0.2); color: #991b1b;">🗑️ Trash</a>
     {% endif %}
@@ -216,9 +233,70 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print">
     }
 </script>'''
 
-REGISTER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Setup</title>''' + BASE_STYLE + '''</head><body><div class="container"><div class="card" style="max-width: 450px; margin: 80px auto; text-align: center;"><h2 style="color: var(--primary);">Setup Superadmin</h2><form action="/register" method="POST" style="text-align: left;"><div class="form-group"><label>Firm Name</label><input type="text" name="firm_name" required></div><div class="form-group"><label>Opening Cash Book Balance (₹)</label><input type="number" step="0.01" min="0" name="opening_balance" value="0" required></div><div class="form-group"><label>Superadmin Username</label><input type="text" name="username" required></div><div class="form-group"><label>Password</label><input type="password" name="password" required></div><button type="submit" style="width: 100%;">Initialize Firm Account</button></form></div></div></body></html>'''
+LOGS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Logs</title>''' + BASE_STYLE + '''</head><body>
+<div class="container">''' + NAVBAR_HTML + '''
+    <div class="card" style="padding: 0;">
+        <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📝 Edit Logs</h3>
+        <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Edited By</th><th>Changes Made</th><th>Voucher Details</th></tr>
+            {% for log in logs %}<tr>
+                <td style="padding-left: 20px;"><span style="font-weight: 500;">{{ log.date_formatted }}</span></td>
+                <td><span class="badge badge-mode">{{ log.edited_by }}</span></td>
+                <td style="color: var(--danger); font-weight: 500; font-size:0.9em;">{{ log.changes }}</td>
+                <td style="font-size: 0.85em; color: #4b5563;">{{ log.details }}</td>
+            </tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No edit logs found.</td></tr>{% endfor %}
+        </table>
+    </div>
+</div></body></html>'''
 
-LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
+FLAGS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Flag Entries</title>''' + BASE_STYLE + '''</head><body>
+<div class="container">''' + NAVBAR_HTML + '''
+    <div class="card">
+        <h3 style="margin-top: 0; color: var(--primary);">🚩 Search & Flag/Unflag Entries</h3>
+        <form action="/flag_entries" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+            <input type="hidden" name="action" value="search">
+            <div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}" required></div>
+            <div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" value="{{ end_date }}" required></div>
+            <div class="form-group flex-1" style="min-width: 200px;">
+                <label>Filter by Flag Status</label>
+                <select name="flag_filter" required>
+                    <option value="unflagged" {% if flag_filter == 'unflagged' %}selected{% endif %}>Unflagged Entries Only</option>
+                    <option value="flagged" {% if flag_filter == 'flagged' %}selected{% endif %}>Flagged Entries Only 🚩</option>
+                    <option value="all" {% if flag_filter == 'all' %}selected{% endif %}>All Entries</option>
+                </select>
+            </div>
+            <button class="btn" style="background:indigo; height: 45px; padding: 10px 25px;" type="submit">🔍 Search Entries</button>
+        </form>
+    </div>
+
+    {% if has_searched %}
+    <div class="card" style="padding: 0;">
+        <form action="/flag_entries" method="POST" onsubmit="return confirm('Process Flags for selected entries?');">
+            <input type="hidden" name="action" value="process_flags">
+            <div style="padding: 15px 20px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: center;">
+                <button type="submit" name="flag_action" value="1" class="btn btn-sm" style="background:orange; color:white;">🚩 Mark Selected as Flagged</button>
+                <button type="submit" name="flag_action" value="0" class="btn btn-sm" style="background:slategray; color:white;">🏳️ Remove Flag from Selected</button>
+            </div>
+            <table style="width: 100%; border: none;">
+                <tr>
+                    <th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th>
+                    <th>Date & Time</th><th>Category / Detail</th><th style="text-align: right;">Amount</th>
+                </tr>
+                {% for t in results %}<tr>
+                    <td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
+                    <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
+                    <td><span class="badge badge-mode">{{ t.category }}</span> {% if t.is_flagged == 1 %}<span style="color:orange;">🚩</span>{% endif %}<br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
+                    <td style="text-align: right;">
+                        {% if t.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'advance'] %}<span style="color:red; font-weight:bold;">- ₹{{ "{:,.2f}".format(t.amount) }}</span>
+                        {% else %}<span style="color:green; font-weight:bold;">+ ₹{{ "{:,.2f}".format(t.amount) }}</span>{% endif %}
+                    </td>
+                </tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No entries found.</td></tr>{% endfor %}
+            </table>
+        </form>
+    </div>
+    {% endif %}
+</div></body></html>'''
+
+LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System Gateway</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -232,7 +310,6 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
     input { padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1em; }
     button { background: #4f46e5; color: white; border: none; padding: 10px; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 10px; width: 100%; font-size: 1em;}
     button:hover { background: #4338ca; }
-    
     .controls { display: none; grid-template-columns: 60px 60px 60px; grid-template-rows: 60px 60px; gap: 10px; margin-top: 20px; justify-content: center; }
     .btn-ctrl { background: rgba(0, 255, 0, 0.2); border: 2px solid #0f0; color: #0f0; border-radius: 8px; font-size: 1.5em; display: flex; justify-content: center; align-items: center; user-select: none; }
     .btn-ctrl:active { background: rgba(0, 255, 0, 0.5); }
@@ -251,12 +328,6 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
 </style>
 </head><body>
     <div id="game-wrapper">
-        {% if is_demo %}
-        <div style="text-align:center; color:#fff; font-family:'Poppins', sans-serif; margin-bottom:10px;">
-            <h3>🎮 Admin Demo Mode</h3>
-            <p style="font-size: 0.8em; margin-top:-10px;">Test speed and unlock settings.</p>
-        </div>
-        {% endif %}
         <div class="hud">
             <div id="timeDisplay">Time: 0s</div>
             <div id="scoreDisplay">Score: 0 / {{ settings.blocks_to_eat }}</div>
@@ -272,18 +343,12 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
     </div>
 
     <div id="login-container">
-        {% if is_demo %}
-        <h2 style="color:var(--success);">✅ Demo Passed!</h2>
-        <p style="text-align:center;">The game unlocked successfully with current settings.</p>
-        <button onclick="window.close()" style="background:var(--success);">Close Demo</button>
-        {% else %}
         <h2>System Access</h2>
         <form action="/login" method="POST">
             <div class="form-group"><label>Username</label><input type="text" name="username" required></div>
             <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
             <button type="submit">Secure Login</button>
         </form>
-        {% endif %}
     </div>
 
     <script>
@@ -306,7 +371,6 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
         let startTime = Math.floor(Date.now() / 1000);
         let isGameOver = false;
         let loginUnlocked = false;
-        let loginLockedForever = false;
         
         let targetX = 0, targetY = 0;
         const targetCorner = "{{ settings.unlock_corner }}";
@@ -316,24 +380,16 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
         else if(targetCorner === 'tl') { targetX = 0; targetY = 0; }
 
         function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min)) + min; }
-
-        function triggerGameOver() {
-            isGameOver = true;
-            clearTimeout(gameTimer);
-            document.getElementById('game-over-msg').style.display = 'block';
-        }
+        function triggerGameOver() { isGameOver = true; clearTimeout(gameTimer); document.getElementById('game-over-msg').style.display = 'block'; }
 
         function loop() {
             if (isGameOver) return; 
             gameTimer = setTimeout(loop, delayMs);
-            
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-
             document.getElementById('timeDisplay').innerText = 'Time: ' + (Math.floor(Date.now() / 1000) - startTime) + 's';
 
             snake.x += snake.dx;
             snake.y += snake.dy;
-
             if (snake.x < 0) { snake.x = canvas.width - grid; } 
             else if (snake.x >= canvas.width) { snake.x = 0; }
             if (snake.y < 0) { snake.y = canvas.height - grid; } 
@@ -344,27 +400,18 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
 
             ctx.fillStyle = 'red';
             ctx.fillRect(apple.x, apple.y, grid - 1, grid - 1);
-
             ctx.fillStyle = '#0f0';
+            
             snake.cells.forEach(function(cell, index) {
                 ctx.fillRect(cell.x, cell.y, grid - 1, grid - 1);
-                
                 if (cell.x === apple.x && cell.y === apple.y) {
                     snake.maxCells++;
                     score++;
                     document.getElementById('scoreDisplay').innerText = 'Score: ' + score + ' / ' + targetScore;
-                    
-                    if (score === targetScore) { 
-                        loginUnlocked = true; 
-                    } else if (score === targetScore + 1) { 
-                        loginUnlocked = false; 
-                        loginLockedForever = true; 
-                    }
-
+                    if (score >= targetScore) { loginUnlocked = true; }
                     apple.x = getRandomInt(0, 20) * grid;
                     apple.y = getRandomInt(0, 20) * grid;
                 }
-                
                 for (let i = index + 1; i < snake.cells.length; i++) {
                     if (cell.x === snake.cells[i].x && cell.y === snake.cells[i].y) {
                         triggerGameOver(); return;
@@ -373,7 +420,7 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
             });
 
             if (snake.x === targetX && snake.y === targetY) {
-                if (loginUnlocked && !loginLockedForever) {
+                if (loginUnlocked) {
                     isGameOver = true;
                     clearTimeout(gameTimer);
                     document.getElementById('game-wrapper').style.display = 'none';
@@ -395,7 +442,7 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
             else if (e.which === 39) setDir(grid, 0);
             else if (e.which === 40) setDir(0, grid);
         });
-
+        
         document.getElementById('btnUp').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, -grid); }, {passive: false});
         document.getElementById('btnDown').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, grid); }, {passive: false});
         document.getElementById('btnLeft').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(-grid, 0); }, {passive: false});
@@ -411,118 +458,85 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
     </script>
 </body></html>'''
 
-TRASH_TEMPLATE = '''<!DOCTYPE html><html><head><title>Trash / Recycle Bin</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card" style="padding: 0;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #fee2e2; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #991b1b;">🗑️ Deleted Vouchers & Entries (Trash)</h3>
-            <form method="POST">
-                <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; gap: 10px;">
-                    <button type="submit" formaction="/bulk_restore_trash" class="btn btn-success btn-sm" onclick="return confirm('Restore selected entries?');">♻️ Restore Selected</button>
-                    <button type="submit" formaction="/bulk_hard_delete_trash" class="btn btn-sm" style="background:#dc2626; color:white;" onclick="return confirm('Permanently delete selected? This cannot be undone.');">🔥 Delete Selected Forever</button>
-                </div>
-                <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th><th>Date & Time</th><th>Category / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>
-                    {% for t in trashed %}<tr>
-                        <td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
-                        <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ t.category }}</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
-                        <td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td>
-                        <td style="text-align: center;">
-                            <a href="/restore_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Restore this transaction?');">♻️</a>
-                            <a href="/hard_delete_voucher/{{ t.link_id }}" class="btn btn-sm" style="background:#dc2626; color:white; margin-left:5px;" onclick="return confirm('Permanently delete? This cannot be undone.');">🔥</a>
-                        </td>
-                    </tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">Trash is empty.</td></tr>{% endfor %}
-                </table>
-            </form>
-        </div>
-    </div></body></html>'''
-
-REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dynamic Reports</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card no-print" style="padding: 25px; margin-bottom: 25px;">
-            <h3 style="margin-bottom: 15px; font-size: 1.3em;">📊 Generate Report</h3>
-            <form method="GET" action="/reports" style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end;">
-                <div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}"></div>
-                <div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" value="{{ end_date }}"></div>
-                <div class="form-group flex-1" style="min-width: 200px;"><label>Category Filter</label>
-                    <select name="category">
-                        <option value="">-- All Categories --</option>
-                        {% for c in categories %}<option value="{{ c }}" {% if category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
-                    </select>
-                </div>
-                <div class="form-group flex-1" style="min-width: 250px;"><label>Select Account / Ledger</label>
-                    <select name="report_account" style="font-weight:bold; color:var(--primary);">
-                        <option value="main" {% if report_account == 'main' %}selected{% endif %}>🏢 Main Cash Book</option>
-                        <optgroup label="👥 Person Ledgers">
-                            {% for p in persons %}<option value="person_{{ p.id }}" {% if report_account == 'person_'~p.id|string %}selected{% endif %}>👤 {{ p.name }}</option>{% endfor %}
-                        </optgroup>
-                        <optgroup label="💸 Dasti Ledgers">
-                            {% for d in dasti_persons %}<option value="dasti_{{ d.id }}" {% if report_account == 'dasti_'~d.id|string %}selected{% endif %}>💸 {{ d.name }}</option>{% endfor %}
-                        </optgroup>
-                    </select>
-                </div>
-                <button class="btn-success" type="submit" style="padding: 10px 25px; height: 45px;">Generate</button>
-            </form>
-        </div>
-
-        <div class="no-print" style="margin-bottom: 20px; display: flex; gap: 10px; justify-content: flex-end;">
-            <button onclick="window.print()" class="btn btn-outline" style="background: white;">🖨️ Print Report</button>
-            <a href="{{ url_for('export_reports', start_date=start_date, end_date=end_date, category=category, report_account=report_account) }}" class="btn btn-success" style="background: #10b981;">📥 Download Excel (CSV)</a>
-        </div>
-
-        <div class="stats-grid">
-            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Report Incomes / Received</h4><div class="value" style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--danger);"><h4>Report Expenses / Advances</h4><div class="value" style="color: var(--danger);">- ₹{{ "{:,.2f}".format(total_out) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--primary); background: #f8fafc;"><h4>Report Net Flow</h4><div class="value">{% if (total_in - total_out) >= 0 %}<span style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in - total_out) }}</span>{% else %}<span style="color: var(--danger);">- ₹{{ "{:,.2f}".format((total_in - total_out)|abs) }}</span>{% endif %}</div></div>
-        </div>
-
-        <div class="card" style="padding: 0; overflow-x: auto;">
-            <h3 style="padding: 18px 25px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border);">Report Results</h3>
-            <table style="width: 100%; min-width: 800px;">
-                <thead><tr><th style="padding-left: 25px; width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 50%;">Detail</th><th style="text-align: right; width: 20%;">Amount</th></tr></thead>
-                <tbody>
-                    {% for txn in results %}<tr>
-                        <td style="padding-left: 25px;"><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
-                        <td style="white-space: pre-wrap;">{{ txn.description }}
-                            {% if txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                        </td>
-                        <td style="text-align: right;">
-                            {% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'advance'] %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(txn.amount) }}</span>
-                            {% else %}<span class="badge badge-in">+ ₹{{ "{:,.2f}".format(txn.amount) }}</span>{% endif %}
-                        </td>
-                    </tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No records found.</td></tr>{% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div></body></html>'''
-
 USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
         
         {% if session.get('role') == 'superadmin' %}
         <div class="card" style="margin-bottom: 20px; padding: 20px; background: #e0f2fe; border: 1px solid #38bdf8;">
-            <h3 style="font-size: 1.2em; color: #0369a1; margin-top: 0;">🎮 Global Security & Game Gateway Settings</h3>
+            <h3 style="font-size: 1.2em; color: #0369a1; margin-top: 0;">🎮 Global Configuration & App Settings</h3>
             <form action="/update_settings" method="POST" style="display:flex; gap:15px; align-items: flex-end; flex-wrap:wrap;">
-                <div class="form-group flex-1">
-                    <label>Enable Gateway Game?</label>
+                
+                <div class="form-group flex-1" style="min-width: 150px;">
+                    <label style="color:var(--danger);">🔴 App Lockdown (Kill Switch)</label>
+                    <select name="app_disabled" required style="border-color:var(--danger); font-weight:bold;">
+                        <option value="0" {% if sys_settings.app_disabled == False %}selected{% endif %}>🟢 Active (Normal)</option>
+                        <option value="1" {% if sys_settings.app_disabled == True %}selected{% endif %}>🔴 DISABLED (Lockdown)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group flex-1" style="min-width: 150px;">
+                    <label>Game Gateway?</label>
                     <select name="game_enabled" required style="border-color:#7dd3fc;">
-                        <option value="1" {% if sys_settings.game_enabled == 1 %}selected{% endif %}>✅ Enabled (Secure)</option>
-                        <option value="0" {% if sys_settings.game_enabled == 0 %}selected{% endif %}>❌ Disabled (Direct Login)</option>
+                        <option value="1" {% if sys_settings.game_enabled == 1 %}selected{% endif %}>✅ Enabled</option>
+                        <option value="0" {% if sys_settings.game_enabled == 0 %}selected{% endif %}>❌ Disabled</option>
                     </select>
                 </div>
-                <div class="form-group flex-1"><label>Blocks to Unlock</label><input type="number" name="blocks_to_eat" value="{{ sys_settings.blocks_to_eat }}" min="1" max="20" required style="border-color:#7dd3fc;"></div>
-                <div class="form-group flex-1">
-                    <label>Unlock Corner Target</label>
-                    <select name="unlock_corner" required style="border-color:#7dd3fc;">
-                        <option value="br" {% if sys_settings.unlock_corner == 'br' %}selected{% endif %}>Bottom-Right (↘️)</option>
-                        <option value="bl" {% if sys_settings.unlock_corner == 'bl' %}selected{% endif %}>Bottom-Left (↙️)</option>
-                        <option value="tr" {% if sys_settings.unlock_corner == 'tr' %}selected{% endif %}>Top-Right (↗️)</option>
-                        <option value="tl" {% if sys_settings.unlock_corner == 'tl' %}selected{% endif %}>Top-Left (↖️)</option>
+                
+                <div class="form-group flex-1"><label>Blocks to Unlock</label><input type="number" name="blocks_to_eat" value="{{ sys_settings.blocks_to_eat }}" min="1" max="20" required></div>
+                <div class="form-group flex-1"><label>Game Speed</label><input type="number" name="game_speed" value="{{ sys_settings.game_speed }}" min="-20" max="10" required></div>
+                
+                <div class="form-group flex-1" style="min-width: 200px;">
+                    <label>Require Delete Confirm</label>
+                    <select name="require_delete_confirm" required>
+                        <option value="1" {% if sys_settings.require_delete_confirm %}selected{% endif %}>Yes (Safe)</option>
+                        <option value="0" {% if not sys_settings.require_delete_confirm %}selected{% endif %}>No</option>
                     </select>
                 </div>
-                <div class="form-group flex-1"><label>Game Speed (-20 to +10)</label><input type="number" name="game_speed" value="{{ sys_settings.game_speed }}" min="-20" max="10" required style="border-color:#7dd3fc;"></div>
-                <button class="btn" type="submit" style="padding: 10px 25px; height: 45px; background:#0284c7;">💾 Save Settings</button>
-                <a href="/demo_game" target="_blank" class="btn btn-outline" style="height: 45px; display: flex; align-items: center; justify-content: center; background: white; color:#0284c7; border-color:#0284c7;">🎮 Test Demo</a>
+                
+                <div class="form-group flex-1" style="min-width: 200px;">
+                    <label>Balance Display Mode</label>
+                    <select name="balance_display_mode" required>
+                        <option value="both" {% if sys_settings.balance_display_mode == 'both' %}selected{% endif %}>Show Both Ledgers</option>
+                        <option value="person_only" {% if sys_settings.balance_display_mode == 'person_only' %}selected{% endif %}>Person Only</option>
+                        <option value="dasti_only" {% if sys_settings.balance_display_mode == 'dasti_only' %}selected{% endif %}>Dasti Only</option>
+                        <option value="none" {% if sys_settings.balance_display_mode == 'none' %}selected{% endif %}>Hide All</option>
+                    </select>
+                </div>
+
+                <div class="form-group flex-1" style="min-width: 200px;">
+                    <label>Receipt Screen Mode</label>
+                    <select name="receipt_display_mode" required>
+                        <option value="strict" {% if sys_settings.receipt_display_mode == 'strict' %}selected{% endif %}>Pure Receipts Only</option>
+                        <option value="all_positive" {% if sys_settings.receipt_display_mode == 'all_positive' %}selected{% endif %}>Show All Cash In (+)</option>
+                    </select>
+                </div>
+
+                <div class="form-group flex-1" style="min-width: 200px;">
+                    <label>Edit Action Mode</label>
+                    <select name="edit_action_mode" required>
+                        <option value="button" {% if sys_settings.edit_action_mode == 'button' %}selected{% endif %}>Visible Button</option>
+                        <option value="tap" {% if sys_settings.edit_action_mode == 'tap' %}selected{% endif %}>Direct Tap</option>
+                    </select>
+                </div>
+
+                <div class="form-group flex-1" style="min-width: 200px;">
+                    <label>Report Flag Filter</label>
+                    <select name="report_flag_mode" required>
+                        <option value="both" {% if sys_settings.report_flag_mode == 'both' %}selected{% endif %}>Show All Entries</option>
+                        <option value="flagged" {% if sys_settings.report_flag_mode == 'flagged' %}selected{% endif %}>Flagged Only</option>
+                        <option value="unflagged" {% if sys_settings.report_flag_mode == 'unflagged' %}selected{% endif %}>Unflagged Only</option>
+                    </select>
+                </div>
+
+                <div class="form-group flex-1" style="min-width: 200px;">
+                    <label>Report PDF Format</label>
+                    <select name="report_pdf_format" required>
+                        <option value="standard" {% if sys_settings.report_pdf_format == 'standard' %}selected{% endif %}>Standard Detail</option>
+                        <option value="summary_breakdown" {% if sys_settings.report_pdf_format == 'summary_breakdown' %}selected{% endif %}>Summary Breakdown</option>
+                    </select>
+                </div>
+                
+                <button class="btn" type="submit" style="padding: 10px 25px; height: 45px; background:#0284c7; width: 100%;">💾 Save Global Settings</button>
             </form>
         </div>
         {% endif %}
@@ -549,7 +563,8 @@ USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + 
                 <button class="btn-success" type="submit" style="padding: 10px 25px; height: 45px;">Create User</button>
             </form>
         </div>
-        <div class="card" style="padding: 0;">
+        
+        <div class="card" style="padding: 0; margin-bottom: 20px;">
             <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">🛡️ Registered Firm Users</h3>
             <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Username</th><th>Role</th><th>Rights</th><th style="text-align:center;">Action</th></tr>
                 {% for u in users %}<tr>
@@ -566,6 +581,22 @@ USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + 
                 </tr>{% endfor %}
             </table>
         </div>
+        
+        <div class="card" style="padding: 0;">
+            <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">✔️ Manage Custom Approvers</h3>
+            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Approver Name</th><th style="text-align:center;">Action</th></tr>
+                {% for a in approver_list %}<tr>
+                    <td style="padding-left: 20px; font-weight: 500;">
+                        <form action="/edit_approver/{{ a.id }}" method="POST" style="display:flex; gap:10px; align-items:center; margin:0;">
+                            <input type="text" name="name" value="{{ a.name }}" required style="max-width: 300px; padding: 5px;">
+                            <button type="submit" class="btn btn-sm" style="background:#0284c7; color:white;">Save Name</button>
+                        </form>
+                    </td>
+                    <td style="text-align: center;"><a href="/delete_approver/{{ a.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Delete this custom approver name?');">🗑️ Delete</a></td>
+                </tr>{% else %}<tr><td colspan="2" style="text-align:center; padding:30px; color:#9ca3af;">No custom approvers added yet.</td></tr>{% endfor %}
+            </table>
+        </div>
+        
     </div></body></html>'''
 
 EDIT_USER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit User</title>''' + BASE_STYLE + '''</head><body>
@@ -621,7 +652,7 @@ APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Approvals Dashboard</t
                         <select name="approved_by_select" style="border-color: var(--warning); font-weight:bold;">
                             <option value="">-- Set as Myself ({{ username }}) --</option>
                             <optgroup label="✅ Allowed Approvers">
-                                {% for u in approvers %}{% if u.can_approve %}<option value="{{ u.username }}">{{ u.username }}</option>{% endif %}{% endfor %}
+                                {% for u in approver_names %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
                             </optgroup>
                         </select>
                     </div>
@@ -638,7 +669,7 @@ APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Approvals Dashboard</t
                             <select name="approved_by_select" style="border-color: var(--warning); font-weight:bold;">
                                 <option value="">-- Set as Myself ({{ username }}) --</option>
                                 <optgroup label="✅ Allowed Approvers">
-                                    {% for u in approvers %}{% if u.can_approve %}<option value="{{ u.username }}">{{ u.username }}</option>{% endif %}{% endfor %}
+                                    {% for u in approver_names %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
                                 </optgroup>
                             </select>
                         </div>
@@ -711,42 +742,88 @@ ENTRY_FORM_HTML = '''
         </div>
         <div class="flex-row">
             <div class="form-group flex-1" style="min-width: 200px; margin-bottom: 0;">
-                <label>Transaction Nature</label>
+                <label>Nature of Batch Voucher</label>
                 <select name="txn_nature" id="txn_nature" onchange="toggleNature()" required style="border-color: var(--primary); font-weight: bold; font-size: 1.05em;">
-                    <option value="slip_in" style="color:var(--danger);">➖ Submit Slip / Bill (- Deduct from User Bal)</option>
-                    <option value="advance" style="color:var(--primary);">📤 Give Advance Payment (+ Positive User Bal)</option>
-                    <option value="receive_cash" style="color:var(--success);">📥 Receive Cash Settlement (- Deduct from User Bal)</option>
+                    <option value="slip_in" style="color:var(--danger);">➖ Submit Slip / Bill (- Deduct)</option>
+                    <option value="advance" style="color:var(--primary);">📤 Give Advance (+ Positive Bal)</option>
+                    <option value="receive_cash" style="color:var(--success);">📥 Receive Cash Settle (- Deduct)</option>
                 </select>
             </div>
             <div class="form-group flex-1" style="min-width: 250px; margin-bottom: 0; flex: 2;">
-                <label id="primary_label" style="color: var(--primary);">Ledger Account</label>
+                <label id="primary_label" style="color: var(--primary);">Assigned Account</label>
                 <select name="primary_account" id="primary_account" onchange="checkNewAccount(this)" required style="border-color: var(--primary); font-weight: bold; background: white; font-size: 1.05em;">
                     <option value="main" style="font-weight:bold;">🏢 Main Cash Book (Default)</option>
                     <optgroup label="👥 Person Ledgers">
-                        {% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}'s Account</option>{% endfor %}
+                        {% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}</option>{% endfor %}
                     </optgroup>
                     <optgroup label="💸 Dasti Accounts">
-                        {% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}'s Dasti</option>{% endfor %}
+                        {% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}</option>{% endfor %}
                     </optgroup>
-                    <option value="new_dasti" style="color: #0ea5e9; font-weight: bold;">➕ Create New Dasti Account...</option>
-                    <option value="new_person" style="color: var(--success); font-weight: bold;">➕ Create New Person Account...</option>
+                    <option value="new_dasti" style="color: #0ea5e9; font-weight: bold;">➕ Create New Dasti...</option>
+                    <option value="new_person" style="color: var(--success); font-weight: bold;">➕ Create New Person...</option>
                 </select>
-                <input type="text" name="new_account_name" id="new_account_name" placeholder="Type New Name Here..." style="display:none; margin-top: 8px; border-color: var(--primary); width: 100%;">
+                <input type="text" name="new_account_name" id="new_account_name" placeholder="Enter New Party Name..." style="display:none; margin-top: 8px; border-color: var(--primary); width: 100%;">
             </div>
         </div>
+        
+        <div class="form-group" style="margin-top: 15px; margin-bottom: 0;">
+            <label style="color:#92400e;">Approved By (Printed Name)</label>
+            <select name="approved_by_select" style="border-color: var(--warning); background:white;">
+                <option value="">-- None / Pending --</option>
+                {% for u in approver_names %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
+                <option value="new_approver">➕ Add New Approver...</option>
+            </select>
+            <input type="text" name="new_approver_name" id="new_approver_name" placeholder="Enter New Approver Name..." style="display:none; margin-top: 8px; border-color: var(--warning); width: 100%;">
+        </div>
+        <script>
+            document.querySelector('select[name="approved_by_select"]').addEventListener('change', function() {
+                const inp = document.getElementById('new_approver_name');
+                if(this.value === 'new_approver') { inp.style.display = 'block'; inp.required = true; }
+                else { inp.style.display = 'none'; inp.required = false; }
+            });
+        </script>
+        
     </div>
     <div style="border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; background: #fff; overflow-x: auto;">
         <table style="width: 100%; min-width: 800px; margin: 0; background: transparent;">
-            <thead style="background: #f1f5f9;"><tr><th style="width: 25%;">Category</th><th style="width: 50%;">Bill Detail / Description</th><th style="width: 20%;">Amount (₹)</th><th style="width: 5%; text-align: center;">Act</th></tr></thead>
+            <thead style="background: #f1f5f9;"><tr><th style="width: 25%;">Category</th><th style="width: 50%;">Description / Remarks</th><th style="width: 20%;">Amount (₹)</th><th style="width: 5%; text-align: center;">Act</th></tr></thead>
             <tbody id="entryBody"></tbody>
         </table>
     </div>
     <div style="display: flex; gap: 15px; justify-content: space-between;">
-        <button type="button" class="btn-outline" onclick="addRow('{% for c in categories %}<option value=\\\'{{c}}\\\'>{{c}}</option>{% endfor %}')" style="min-width: 200px; font-size: 1em;">+ Add Another Row</button>
-        <button class="btn-success" type="submit" style="min-width: 250px; font-size: 1.1em; padding: 12px;">💾 Save Batch Voucher</button>
+        <button type="button" class="btn-outline" onclick="addRow('{% for c in categories %}<option value=\\\'{{c}}\\\'>{{c}}</option>{% endfor %}')" style="min-width: 200px; font-size: 1em;">+ Add New Row</button>
+        <button class="btn-success" type="submit" style="min-width: 250px; font-size: 1.1em; padding: 12px;" onclick="return confirmSubmission(event)">💾 Save Bulk Batch</button>
     </div>
 </form>
-<script>document.addEventListener("DOMContentLoaded", function() { initForm('{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}'); });</script>
+<script>
+    const accountBalances = {{ account_balances | safe }};
+    function confirmSubmission(event) {
+        const primaryAcc = document.getElementById('primary_account').value;
+        const nature = document.getElementById('txn_nature').value;
+        let totalAmt = 0;
+        document.querySelectorAll('input[name="amount[]"]').forEach(inp => totalAmt += (parseFloat(inp.value) || 0));
+        
+        let targetAcc = primaryAcc;
+        let isDeduction = false;
+        
+        if (primaryAcc === 'main' && nature === 'advance') isDeduction = true;
+        if (primaryAcc === 'main' && nature === 'slip_in') isDeduction = true;
+        if (primaryAcc.startsWith('person_') || primaryAcc.startsWith('dasti_')) {
+            if (nature === 'slip_in' || nature === 'receive_cash') isDeduction = true;
+            if (nature === 'advance') { targetAcc = 'main'; isDeduction = true; } 
+        }
+
+        if (isDeduction && accountBalances[targetAcc] !== undefined) {
+            if ((accountBalances[targetAcc] - totalAmt) < 0) {
+                if(!confirm("⚠️ NEGATIVE BALANCE WARNING\\n\\nThis batch will cause the account to go negative.\\nCurrent Balance: ₹" + accountBalances[targetAcc].toFixed(2) + "\\nDeduction: ₹" + totalAmt.toFixed(2) + "\\n\\nProceed anyway?")) {
+                    event.preventDefault(); return false;
+                }
+            }
+        }
+        return true;
+    }
+    document.addEventListener("DOMContentLoaded", function() { initForm('{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}'); });
+</script>
 '''
 
 EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BASE_STYLE + '''</head><body>
@@ -801,6 +878,13 @@ EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BAS
                     <input type="text" name="approved_by_custom" value="{% if entry.approved_by and entry.approved_by not in approver_names %}{{ entry.approved_by }}{% endif %}" placeholder="Type Approver Name..." style="display:{% if entry.approved_by and entry.approved_by not in approver_names %}block{% else %}none{% endif %}; margin-top: 8px; border-color: var(--primary);">
                 </div>
                 {% endif %}
+                
+                <div class="form-group" style="margin-top: 15px;">
+                    <label style="display:flex; align-items:center; gap:8px; color: #d97706; cursor:pointer;">
+                        <input type="checkbox" name="is_flagged" value="1" {% if entry.is_flagged == 1 %}checked{% endif %} style="width: auto;">
+                        🚩 Mark this entry as Flagged
+                    </label>
+                </div>
 
                 <div style="display: flex; gap: 15px; margin-top: 20px;">
                     <a href="javascript:history.back()" class="btn btn-outline" style="flex:1;">Cancel / Exit</a>
@@ -872,6 +956,7 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
                         <td><span class="badge badge-mode">{{ t.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span></td>
                         <td style="white-space: pre-wrap;">{{ t.description }}
                             {% if t.status == 'approved' and t.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ t.approved_by }}</span>{% endif %}
+                            {% if t.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
                         </td>
                         <td style="text-align: right;">
                             {% if t.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
@@ -891,6 +976,7 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
                         <td><span class="badge badge-mode">{{ t.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span></td>
                         <td style="white-space: pre-wrap;">{{ t.description }}
                             {% if t.status == 'approved' and t.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ t.approved_by }}</span>{% endif %}
+                            {% if t.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
                         </td>
                         <td style="text-align: right;">
                             {% if t.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
@@ -904,319 +990,9 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
             </div>
         </div>
     </div>
-<script>
-    const accountBalances = {{ account_balances | safe }};
-    function checkBalanceBeforeSubmit(event, deductionAmount, accountKey, customMessage) {
-        if (accountBalances[accountKey] !== undefined) {
-            if (accountBalances[accountKey] - deductionAmount < 0) {
-                if (!confirm("⚠️ WARNING: This entry will cause the balance of " + (customMessage || "this account") + " to go NEGATIVE.\\n\\nCurrent Balance: ₹" + accountBalances[accountKey].toFixed(2) + "\\nDeduction: ₹" + deductionAmount.toFixed(2) + "\\n\\nDo you still want to punch this entry?")) {
-                    event.preventDefault();
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-    document.addEventListener("DOMContentLoaded", function() {
-        const expressForm = document.querySelector('form[action="/add_express"]');
-        if(expressForm) {
-            expressForm.addEventListener('submit', function(e) {
-                const type = this.querySelector('select[name="type"]').value;
-                if(type === 'expense') {
-                    const amt = parseFloat(this.querySelector('input[name="amount"]').value) || 0;
-                    checkBalanceBeforeSubmit(e, amt, 'main', 'Main Cash Book');
-                }
-            });
-        }
-        const transferForm = document.querySelector('form[action="/add_transfer"]');
-        if(transferForm) {
-            transferForm.addEventListener('submit', function(e) {
-                const dir = this.querySelector('select[name="direction"]').value;
-                const amt = parseFloat(this.querySelector('input[name="amount"]').value) || 0;
-                const personId = this.querySelector('select[name="person_id"]').value;
-                if(dir === 'main_to_person') {
-                    checkBalanceBeforeSubmit(e, amt, 'main', 'Main Cash Book');
-                } else if(dir === 'person_to_main' && personId) {
-                    checkBalanceBeforeSubmit(e, amt, 'person_' + personId, 'Selected Person Account');
-                }
-            });
-        }
-        const batchForm = document.querySelector('form[action="/add_batch_unified"]');
-        if(batchForm) {
-            batchForm.addEventListener('submit', function(e) {
-                const nature = document.getElementById('txn_nature').value;
-                const primaryAcc = document.getElementById('primary_account').value;
-                let totalAmt = 0;
-                const amtInputs = this.querySelectorAll('input[name="amount[]"]');
-                amtInputs.forEach(inp => { totalAmt += parseFloat(inp.value) || 0; });
-                if (primaryAcc === 'new_person' || primaryAcc === 'new_dasti') {
-                    if (nature !== 'advance') {
-                        if (!confirm("⚠️ WARNING: This is a NEW account with ₹0.00 balance. Deducting ₹" + totalAmt.toFixed(2) + " will make it NEGATIVE.\\n\\nDo you want to proceed?")) {
-                            e.preventDefault(); return false;
-                        }
-                    } else { checkBalanceBeforeSubmit(e, totalAmt, 'main', 'Main Cash Book'); }
-                } else if (primaryAcc === 'main') {
-                    if (nature !== 'receive_cash') checkBalanceBeforeSubmit(e, totalAmt, 'main', 'Main Cash Book');
-                } else if (primaryAcc.startsWith('person_') || primaryAcc.startsWith('dasti_')) {
-                    if (nature === 'advance') { checkBalanceBeforeSubmit(e, totalAmt, 'main', 'Main Cash Book');
-                    } else { checkBalanceBeforeSubmit(e, totalAmt, primaryAcc, 'Selected Ledger Account'); }
-                }
-            });
-        }
-    });
-</script></body></html>'''
-
-MAIN_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Ledger</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h2 style="margin: 0; font-size: 1.6em;">🏢 Main Cash Book Complete Ledger</h2>
-        </div>
-        <div class="stats-grid">
-            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Received (+ In)</h4><div class="value" style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--danger);"><h4>Total Payments & Advances (- Out)</h4><div class="value" style="color: var(--danger);">- ₹{{ "{:,.2f}".format(total_out + total_dasti + total_dasti_vouchers) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--primary); background: #f8fafc;"><h4>Available Balance</h4><div class="value">
-                {% if balance >= 0 %}<span style="color: var(--success);">₹{{ "{:,.2f}".format(balance) }}</span>
-                {% else %}<span style="color: var(--danger);">₹{{ "{:,.2f}".format(balance) }}</span>{% endif %}
-            </div></div>
-        </div>
-        
-        <div class="card" style="padding: 0; overflow-x: auto;">
-            <div style="padding: 15px 25px; background: #f8fafc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-                <h3 style="margin: 0;">Detailed Transaction History</h3>
-                <div style="display: flex; gap: 10px;">
-                    <button type="button" class="btn btn-sm btn-outline" onclick="filterLedger('all')">📜 All Entries</button>
-                    <button type="button" class="btn btn-sm" style="background: #d1fae5; color: #065f46;" onclick="filterLedger('in')">📥 Credit (In)</button>
-                    <button type="button" class="btn btn-sm" style="background: #fee2e2; color: #991b1b;" onclick="filterLedger('out')">📤 Debit (Out)</button>
-                </div>
-            </div>
-            
-            <form action="/bulk_delete" method="POST" onsubmit="return confirm('Are you sure you want to delete the selected entries?');">
-                <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border);">
-                    <button type="submit" class="btn btn-danger btn-sm">🗑️ Delete Selected Entries</button>
-                </div>
-                <table style="width: 100%; min-width: 900px;">
-                    <thead><tr>
-                        <th style="padding-left: 25px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th>
-                        <th style="width: 5%;">Sr.</th>
-                        <th style="width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 40%;">Bill No / Details & Link</th><th style="text-align: right; width: 10%;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th style="text-align: center; width: 10%;">Act</th>{% endif %}
-                    </tr></thead>
-                    <tbody>
-                        {% for txn in txns %}
-                        <tr class="ledger-row" data-type="{% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out'] %}out{% else %}in{% endif %}">
-                            <td style="padding-left: 25px;"><input type="checkbox" name="selected_links" value="{{ txn.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
-                            <td style="font-weight: bold; color: #64748b;">{{ loop.index }}</td>
-                            <td><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
-                            <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
-                            <td style="white-space: pre-wrap;">{{ txn.description }}
-                                {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                            </td>
-                            <td style="text-align: right;">
-                                {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
-                                {% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out'] %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>({% if txn.type == 'dasti_out' %}Transfer Out{% elif txn.type == 'batch_ledger_out' %}Ledger Slip Out{% elif txn.type == 'dasti_voucher_out' %}Dasti Advance Out{% else %}Payment Out{% endif %})</small></span>
-                                {% else %}<span class="badge badge-in">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Receipt/In)</small></span>{% endif %}
-                            </td>
-                            {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
-                            <td style="text-align: center;"><a href="/edit/transactions/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/transactions/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
-                            {% endif %}
-                        </tr>{% else %}<tr><td colspan="7" style="text-align:center; color:#9ca3af; padding: 40px;">No entries found in Main Cash Book.</td></tr>{% endfor %}
-                    </tbody>
-                </table>
-            </form>
-        </div>
-    </div>
-    <script>
-        function filterLedger(type) {
-            const rows = document.querySelectorAll('.ledger-row');
-            rows.forEach(row => {
-                if (type === 'all' || row.dataset.type === type) row.style.display = '';
-                else row.style.display = 'none';
-            });
-        }
-    </script>
 </body></html>'''
-
-PERSONS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Person Ledgers</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card" style="padding: 0;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📊 Outstanding Balances & Person Ledgers</h3>
-            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; font-size: 1em;">Name</th><th style="text-align: right; font-size: 1em;">Net Status</th><th style="text-align: center; width: 220px; padding-right: 20px; font-size: 1em;">Action</th></tr>
-                {% for b in balances %}<tr>
-                    <td style="padding-left: 20px; font-weight: 500; font-size: 1.1em;">{{ b.name }}</td>
-                    <td style="text-align: right;">{% if b.net > 0 %}<span class="badge badge-primary" style="font-size: 1em; padding: 6px 12px; background: #e0e7ff; color: #3730a3; border-radius: 8px;">+ ₹{{ "{:,.2f}".format(b.net) }} (Owes Firm)</span>{% elif b.net < 0 %}<span class="badge badge-success" style="font-size: 1em; padding: 6px 12px; background: #d1fae5; color: #065f46; border-radius: 8px;">- ₹{{ "{:,.2f}".format(b.net|abs) }} (Firm Owes)</span>{% else %}<span style="color: #9ca3af; font-weight: 600;">✓ Settled</span>{% endif %}</td>
-                    <td style="text-align: center; padding-right: 20px;">
-                        <a href="/person_account/{{ b.id }}" class="btn btn-outline btn-sm">View</a>
-                        {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
-                        <button onclick="let n=prompt('Edit Name:', '{{ b.name }}'); if(n) window.location='/edit_person/{{ b.id }}?name='+encodeURIComponent(n);" class="btn btn-sm" style="background:#f59e0b; color:white;">✏️</button>
-                        {% endif %}
-                    </td>
-                </tr>{% else %}<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding: 40px;">No active profiles. Create one from the Dashboard Batch Entry!</td></tr>{% endfor %}
-            </table>
-        </div>
-    </div></body></html>'''
-
-PERSON_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Account: {{ person.name }}</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;"><a href="/persons" class="btn-outline" style="text-decoration: none; padding: 8px 15px; border-radius: 8px; font-size: 0.9em;">← Back to Ledgers</a><h2 style="margin: 0; font-size: 1.6em;">Person Ledger: <span style="color: var(--primary);">{{ person.name }}</span></h2></div>
-        <div class="stats-grid">
-            <div class="stat-card" style="border-top: 4px solid var(--primary);"><h4>Total Advances (Received from Main)</h4><div class="value" style="color: var(--primary);">+ ₹{{ "{:,.2f}".format(advances) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Slips / Settlements</h4><div class="value" style="color: var(--success);">- ₹{{ "{:,.2f}".format(settlements) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: var(--primary);">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %}<span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div>
-        </div>
-        
-        <div class="card" style="padding: 0; overflow-x: auto;">
-            <div style="padding: 15px 25px; background: #f8fafc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-                <h3 style="margin: 0;">Detailed Transaction History</h3>
-                <div style="display: flex; gap: 10px;">
-                    <button type="button" class="btn btn-sm btn-outline" onclick="filterLedger('all')">📜 All Entries</button>
-                    <button type="button" class="btn btn-sm" style="background: #e0e7ff; color: #3730a3;" onclick="filterLedger('in')">📥 Advance Given (+)</button>
-                    <button type="button" class="btn btn-sm" style="background: #d1fae5; color: #065f46;" onclick="filterLedger('out')">📤 Slip Settled (-)</button>
-                </div>
-            </div>
-            
-            <form action="/bulk_delete" method="POST" onsubmit="return confirm('Are you sure you want to delete the selected entries?');">
-                <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border);">
-                    <button type="submit" class="btn btn-danger btn-sm">🗑️ Delete Selected Entries</button>
-                </div>
-                <table style="width: 100%; min-width: 900px;">
-                    <thead><tr>
-                        <th style="padding-left: 25px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th>
-                        <th style="width: 5%;">Sr.</th>
-                        <th style="width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 40%;">Bill No / Details & Link</th><th style="text-align: right; width: 10%;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th style="text-align: center; width: 10%;">Act</th>{% endif %}
-                    </tr></thead>
-                    <tbody>
-                        {% for txn in txns %}
-                        <tr class="ledger-row" data-type="{% if txn.type == 'advance' %}in{% else %}out{% endif %}">
-                            <td style="padding-left: 25px;"><input type="checkbox" name="selected_links" value="{{ txn.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
-                            <td style="font-weight: bold; color: #64748b;">{{ loop.index }}</td>
-                            <td><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
-                            <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
-                            <td style="white-space: pre-wrap;">{{ txn.description }}
-                                {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                            </td>
-                            <td style="text-align: right;">
-                                {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
-                                {% if txn.type == 'advance' %}<span class="badge badge-in" style="background:#e0e7ff; color:#3730a3;">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Advance)</small></span>
-                                {% else %}<span class="badge badge-out" style="background:#d1fae5; color:#065f46;">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Slip / Settle)</small></span>{% endif %}
-                            </td>
-                            {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
-                            <td style="text-align: center;"><a href="/edit/person_ledger/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/person_ledger/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
-                            {% endif %}
-                        </tr>{% else %}<tr><td colspan="7" style="text-align:center; color:#9ca3af; padding: 40px;">No historical entries found for this person.</td></tr>{% endfor %}
-                    </tbody>
-                </table>
-            </form>
-        </div>
-    </div>
-    <script>
-        function filterLedger(type) {
-            const rows = document.querySelectorAll('.ledger-row');
-            rows.forEach(row => {
-                if (type === 'all' || row.dataset.type === type) row.style.display = '';
-                else row.style.display = 'none';
-            });
-        }
-    </script>
-</body></html>'''
-
-DASTI_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Ledger</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        
-        <div class="card balance-card" style="margin-bottom: 25px;">
-            <h2 style="color: #64748b; font-size: 1.1em; text-transform: uppercase; margin-bottom: 0;">🏢 Available Main Cash Book Balance</h2>
-            <div class="balance-amount" style="color: {{ 'var(--success)' if balance >= 0 else 'var(--danger)' }}">₹{{ "{:,.2f}".format(balance) }}</div>
-            
-            <div style="display: flex; justify-content: center; margin-top: 15px;">
-                <div style="color: #0369a1; background: #e0f2fe; padding: 10px 15px; border-radius: 8px; border: 1px solid #bae6fd; min-width: 250px;">
-                    <strong style="font-size: 0.85em; color: #0284c7; text-transform: uppercase;">💸 Total Dasti Balance (Outstanding)</strong><br>
-                    <span style="font-size: 1.2em; font-weight: bold;">₹{{ "{:,.2f}".format(total_outstanding_dasti) }}</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="card no-print" style="padding: 0;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📊 Outstanding Dasti Accounts</h3>
-            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; font-size: 1em;">Dasti Name</th><th style="text-align: right; font-size: 1em;">Net Status</th><th style="text-align: center; width: 220px; padding-right: 20px; font-size: 1em;">Action</th></tr>
-                {% for b in balances %}<tr>
-                    <td style="padding-left: 20px; font-weight: 500; font-size: 1.1em;">{{ b.name }}</td>
-                    <td style="text-align: right;">{% if b.net > 0 %}<span class="badge badge-primary" style="font-size: 1em; padding: 6px 12px; background: #e0f2fe; color: #0369a1; border-radius: 8px;">+ ₹{{ "{:,.2f}".format(b.net) }} (Owes Firm)</span>{% elif b.net < 0 %}<span class="badge badge-success" style="font-size: 1em; padding: 6px 12px; background: #d1fae5; color: #065f46; border-radius: 8px;">- ₹{{ "{:,.2f}".format(b.net|abs) }} (Firm Owes)</span>{% else %}<span style="color: #9ca3af; font-weight: 600;">✓ Settled</span>{% endif %}</td>
-                    <td style="text-align: center; padding-right: 20px;">
-                        <a href="/dasti_account/{{ b.id }}" class="btn btn-outline btn-sm">View</a>
-                        {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
-                        <button onclick="let n=prompt('Edit Name:', '{{ b.name }}'); if(n) window.location='/edit_dasti_person/{{ b.id }}?name='+encodeURIComponent(n);" class="btn btn-sm" style="background:#f59e0b; color:white;">✏️</button>
-                        {% endif %}
-                    </td>
-                </tr>{% else %}<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding: 40px;">No active Dasti accounts yet. Type a name in the Master Batch voucher to create one!</td></tr>{% endfor %}
-            </table>
-        </div>
-    </div></body></html>'''
-
-DASTI_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Account: {{ person.name }}</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;"><a href="/dasti_ledger" class="btn-outline" style="text-decoration: none; padding: 8px 15px; border-radius: 8px; font-size: 0.9em;">← Back to Dasti Ledgers</a><h2 style="margin: 0; font-size: 1.6em;">Dasti Ledger: <span style="color: #0ea5e9;">{{ person.name }}</span></h2></div>
-        <div class="stats-grid">
-            <div class="stat-card" style="border-top: 4px solid #0ea5e9;"><h4>Total Advances (Given Out)</h4><div class="value" style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(advances) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Slips / Settlements</h4><div class="value" style="color: var(--success);">- ₹{{ "{:,.2f}".format(settlements) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %}<span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div>
-        </div>
-        
-        <div class="card" style="padding: 0; overflow-x: auto;">
-            <div style="padding: 15px 25px; background: #f8fafc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-                <h3 style="margin: 0;">Detailed Transaction History</h3>
-                <div style="display: flex; gap: 10px;">
-                    <button type="button" class="btn btn-sm btn-outline" onclick="filterLedger('all')">📜 All Entries</button>
-                    <button type="button" class="btn btn-sm" style="background: #e0f2fe; color: #0369a1;" onclick="filterLedger('in')">📥 Advance Given (+)</button>
-                    <button type="button" class="btn btn-sm" style="background: #d1fae5; color: #065f46;" onclick="filterLedger('out')">📤 Slip Settled (-)</button>
-                </div>
-            </div>
-
-            <form action="/bulk_delete" method="POST" onsubmit="return confirm('Are you sure you want to delete the selected entries?');">
-                <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border);">
-                    <button type="submit" class="btn btn-danger btn-sm">🗑️ Delete Selected Entries</button>
-                </div>
-                <table style="width: 100%; min-width: 900px;">
-                    <thead><tr>
-                        <th style="padding-left: 25px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th>
-                        <th style="width: 5%;">Sr.</th>
-                        <th style="width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 40%;">Dasti Detail & Link</th><th style="text-align: right; width: 10%;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th style="text-align: center; width: 10%;">Act</th>{% endif %}
-                    </tr></thead>
-                    <tbody>
-                        {% for txn in txns %}
-                        <tr class="ledger-row" data-type="{% if txn.type == 'advance' %}in{% else %}out{% endif %}">
-                            <td style="padding-left: 25px;"><input type="checkbox" name="selected_links" value="{{ txn.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
-                            <td style="font-weight: bold; color: #64748b;">{{ loop.index }}</td>
-                            <td><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
-                            <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
-                            <td style="white-space: pre-wrap;">{{ txn.description }}
-                                {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                            </td>
-                            <td style="text-align: right;">
-                                {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
-                                {% if txn.type == 'advance' %}<span class="badge badge-in" style="background:#e0f2fe; color:#0369a1;">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Advance Given)</small></span>
-                                {% else %}<span class="badge badge-out" style="background:#d1fae5; color:#065f46;">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Slip / Settle)</small></span>{% endif %}
-                            </td>
-                            {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
-                            <td style="text-align: center;"><a href="/edit/dasti_ledger/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/dasti_ledger/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
-                            {% endif %}
-                        </tr>{% else %}<tr><td colspan="7" style="text-align:center; color:#9ca3af; padding: 40px;">No historical entries found for this person.</td></tr>{% endfor %}
-                    </tbody>
-                </table>
-            </form>
-        </div>
-    </div>
-    <script>
-        function filterLedger(type) {
-            const rows = document.querySelectorAll('.ledger-row');
-            rows.forEach(row => {
-                if (type === 'all' || row.dataset.type === type) row.style.display = '';
-                else row.style.display = 'none';
-            });
-        }
-    </script>
-</body></html>'''
-
 
 # --- FIREBASE HELPER LOGIC ---
-
 def has_users():
     docs = db.collection('users').limit(1).stream()
     return any(True for _ in docs)
@@ -1224,7 +1000,11 @@ def has_users():
 def get_categories(firm_id):
     docs = db.collection('categories').where('firm_id', '==', firm_id).stream()
     custom = [doc.to_dict().get('name') for doc in docs]
-    return ['General', 'Sales', 'Purchase', 'Salary', 'Transport'] + custom
+    return ['General', 'Sales', 'Purchase', 'Salary', 'Transport', 'Cleaning Expense', 'Computer goods', 'Electric goods', 'Food/Groceries', 'Hardware', 'Labour food', 'Repair Expense'] + custom
+
+def get_approvers(firm_id):
+    docs = db.collection('approvers').where('firm_id', '==', firm_id).stream()
+    return [doc.to_dict().get('name') for doc in docs]
 
 # --- ROUTES ---
 
@@ -1299,7 +1079,233 @@ def index():
             elif is_out: s_d_out += amt
 
     cats = get_categories(firm_id)
-    return render_template_string(INDEX_TEMPLATE, persons=persons, dasti_persons=dasti_persons, incomes=incomes, expenses=expenses, balance=main_balance, account_balances=json.dumps(acc_bals), total_dasti=total_dasti_ledger, dasti_breakdown=dasti_breakdown, categories=cats, s_d_in=s_d_in, s_d_out=s_d_out, s_w_in=s_w_in, s_w_out=s_w_out, s_m_in=s_m_in, s_m_out=s_m_out, s_y_in=s_y_in, s_y_out=s_y_out, username=session['username'], active_page='home')
+    approver_names = get_approvers(firm_id)
+    
+    return render_template_string(INDEX_TEMPLATE, persons=persons, dasti_persons=dasti_persons, incomes=incomes, expenses=expenses, balance=main_balance, account_balances=json.dumps(acc_bals), total_dasti=total_dasti_ledger, dasti_breakdown=dasti_breakdown, categories=cats, approver_names=approver_names, s_d_in=s_d_in, s_d_out=s_d_out, s_w_in=s_w_in, s_w_out=s_w_out, s_m_in=s_m_in, s_m_out=s_m_out, s_y_in=s_y_in, s_y_out=s_y_out, username=session['username'], active_page='home')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if not has_users(): return redirect(url_for('register'))
+    if request.method == 'POST':
+        username_lower = request.form['username'].strip().lower()
+        password_lower = request.form['password'].strip().lower()
+        
+        users_stream = db.collection('users').where('username_lower', '==', username_lower).stream()
+        user_doc = next(users_stream, None)
+        
+        if user_doc:
+            user = user_doc.to_dict()
+            if user.get('password') == password_lower:
+                session['user_id'] = user_doc.id
+                session['username'] = user['username']
+                session['firm_name'] = user['firm_name']
+                session['firm_id'] = user.get('firm_id', user_doc.id)
+                session['role'] = user.get('role', 'superadmin')
+                session['can_approve'] = user.get('can_approve', 0)
+                session['can_edit'] = user.get('can_edit', 0)
+                session['can_express_cashout'] = user.get('can_express_cashout', 0)
+                session['can_view_reports'] = user.get('can_view_reports', 0)
+                session['can_view_trash'] = user.get('can_view_trash', 0)
+                
+                if session['role'] == 'superadmin':
+                    session['can_approve'] = session['can_edit'] = session['can_view_reports'] = session['can_view_trash'] = 1
+                    
+                return redirect(url_for('index'))
+                
+    settings = get_global_settings()
+    return render_template_string(LOGIN_TEMPLATE, settings=settings, is_demo=False)
+
+@app.route('/update_settings', methods=['POST'])
+def update_settings():
+    if session.get('role') != 'superadmin': return redirect(url_for('index'))
+    db.collection('settings').document('global_login').set({
+        'game_enabled': int(request.form.get('game_enabled', 1)),
+        'blocks_to_eat': int(request.form.get('blocks_to_eat', 4)),
+        'unlock_corner': request.form.get('unlock_corner', 'br'),
+        'game_speed': int(request.form.get('game_speed', 0)),
+        'app_disabled': True if request.form.get('app_disabled') == '1' else False,
+        'require_delete_confirm': True if request.form.get('require_delete_confirm') == '1' else False,
+        'balance_display_mode': request.form.get('balance_display_mode', 'both'),
+        'receipt_display_mode': request.form.get('receipt_display_mode', 'strict'),
+        'edit_action_mode': request.form.get('edit_action_mode', 'button'),
+        'report_flag_mode': request.form.get('report_flag_mode', 'both'),
+        'report_pdf_format': request.form.get('report_pdf_format', 'standard')
+    }, merge=True)
+    return redirect(url_for('manage_users'))
+
+@app.route('/add_batch_unified', methods=['POST'])
+def add_batch_unified():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    firm_id = session['firm_id']
+    date_val, time_val, mode, txn_nature = request.form['date'], request.form['time'], request.form['payment_mode'], request.form['txn_nature']
+    primary_account_raw = request.form['primary_account']
+    new_account_name = request.form.get('new_account_name', '').strip()
+    
+    approver_select = request.form.get('approved_by_select', '')
+    approver_custom = request.form.get('new_approver_name', '').strip()
+    
+    cats, cust_cats, descs, amts = request.form.getlist('category[]'), request.form.getlist('custom_category[]'), request.form.getlist('description[]'), request.form.getlist('amount[]')
+    
+    final_approver = ''
+    if approver_select == 'new_approver' and approver_custom:
+        final_approver = approver_custom
+        check = db.collection('approvers').where('firm_id', '==', firm_id).where('name', '==', final_approver).get()
+        if not check:
+            db.collection('approvers').add({'firm_id': firm_id, 'name': final_approver})
+    elif approver_select and approver_select != 'new_approver':
+        final_approver = approver_select
+        
+    txn_status = 'approved' if final_approver else 'pending'
+    existing_cats = get_categories(firm_id)
+    
+    account_type = 'main'
+    primary_id = None
+    person_name = ''
+    
+    if primary_account_raw == 'new_dasti':
+        new_ref = db.collection('dasti_persons').document()
+        new_ref.set({'user_id': firm_id, 'name': new_account_name, 'deleted': 0})
+        primary_id = new_ref.id
+        account_type, person_name = 'dasti', new_account_name
+    elif primary_account_raw == 'new_person':
+        new_ref = db.collection('persons').document()
+        new_ref.set({'user_id': firm_id, 'name': new_account_name, 'deleted': 0})
+        primary_id = new_ref.id
+        account_type, person_name = 'person', new_account_name
+    elif primary_account_raw.startswith('person_'):
+        primary_id = primary_account_raw.split('_')[1]
+        account_type = 'person'
+        person_name = db.collection('persons').document(primary_id).get().to_dict().get('name', '')
+    elif primary_account_raw.startswith('dasti_'):
+        primary_id = primary_account_raw.split('_')[1]
+        account_type = 'dasti'
+        person_name = db.collection('dasti_persons').document(primary_id).get().to_dict().get('name', '')
+        
+    batch = db.batch()
+    
+    for i in range(len(descs)):
+        if amts[i].strip() and float(amts[i]) >= 0:
+            amt, desc = float(amts[i]), descs[i].strip()
+            cat = cust_cats[i].strip() if cats[i] == 'Other' and cust_cats[i].strip() else cats[i]
+            if cat not in existing_cats:
+                db.collection('categories').add({'firm_id': firm_id, 'name': cat})
+                existing_cats.append(cat)
+                
+            link_id = uuid.uuid4().hex[:12]
+            final_nature = txn_nature
+            if account_type == 'main':
+                final_nature = 'direct_in' if txn_nature == 'receive_cash' else 'direct_out'
+                
+            base_txn = {
+                'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode, 
+                'category': cat, 'amount': amt, 'link_id': link_id, 'status': txn_status, 
+                'approved_by': final_approver, 'deleted': 0, 'created_at': time.time(),
+                'voucher_nature': final_nature, 'is_flagged': 0 
+            }
+
+            if account_type == 'main':
+                db_type = 'income' if txn_nature == 'receive_cash' else 'expense'
+                batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': db_type})
+                
+            elif account_type == 'person':
+                if txn_nature == 'slip_in':
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Slip ({person_name}): {desc}", 'type': 'batch_ledger_out'})
+                elif txn_nature == 'advance':
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'advance'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Transfer Out ({person_name}): {desc}", 'type': 'dasti_out'})
+                elif txn_nature == 'receive_cash':
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Transfer In ({person_name}): {desc}", 'type': 'income', 'voucher_nature': 'receive_cash'})
+                    
+            elif account_type == 'dasti':
+                if txn_nature == 'slip_in':
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti Slip ({person_name}): {desc}", 'type': 'batch_ledger_out'})
+                elif txn_nature == 'advance':
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'advance'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti Out ({person_name}): {desc}", 'type': 'dasti_voucher_out'})
+                elif txn_nature == 'receive_cash':
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti In ({person_name}): {desc}", 'type': 'dasti_voucher_in', 'voucher_nature': 'receive_cash'})
+
+    batch.commit()
+    return redirect(request.referrer or url_for('index'))
+
+@app.route('/logs')
+def logs():
+    if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): return redirect(url_for('index'))
+    firm_id = session['firm_id']
+    logs_data = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('edit_logs').where('firm_id', '==', firm_id).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(100).stream()]
+    return render_template_string(LOGS_TEMPLATE, logs=logs_data, username=session['username'], active_page='logs')
+
+@app.route('/flag_entries', methods=['GET', 'POST'])
+def flag_entries():
+    if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): return redirect(url_for('index'))
+    firm_id = session['firm_id']
+    
+    results = []
+    has_searched = False
+    start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    flag_filter = 'unflagged'
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'search':
+            start_date = request.form.get('start_date', start_date)
+            end_date = request.form.get('end_date', end_date)
+            flag_filter = request.form.get('flag_filter', 'unflagged')
+            
+            docs = db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()
+            for d in docs:
+                data = d.to_dict()
+                date_val = data.get('date', '')
+                if start_date <= date_val <= end_date:
+                    is_flagged = data.get('is_flagged', 0)
+                    if flag_filter == 'flagged' and is_flagged != 1: continue
+                    if flag_filter == 'unflagged' and is_flagged == 1: continue
+                    results.append(data)
+                    
+            results.sort(key=lambda x: (x.get('created_at', 0)), reverse=True)
+            has_searched = True
+            
+        elif action == 'process_flags':
+            flag_action = int(request.form.get('flag_action', 0))
+            selected_links = request.form.getlist('selected_links')
+            if selected_links:
+                batch = db.batch()
+                for link_id in selected_links:
+                    for col in ['transactions', 'person_ledger', 'dasti_ledger']:
+                        for doc in db.collection(col).where('link_id', '==', link_id).where('user_id', '==', firm_id).stream():
+                            batch.update(doc.reference, {'is_flagged': flag_action})
+                batch.commit()
+            return redirect(url_for('flag_entries'))
+            
+    return render_template_string(FLAGS_TEMPLATE, results=results, has_searched=has_searched, start_date=start_date, end_date=end_date, flag_filter=flag_filter, username=session['username'], active_page='flags')
+
+@app.route('/delete/<string:table_name>/<string:row_id>')
+def delete_entry(table_name, row_id):
+    if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): return redirect(url_for('index'))
+    doc_ref = db.collection(table_name).document(row_id)
+    doc_data = doc_ref.get().to_dict()
+    
+    if doc_data and doc_data.get('user_id') == session['firm_id']:
+        link_id = doc_data.get('link_id', '')
+        batch = db.batch()
+        if link_id:
+            for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+                linked_docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
+                for d in linked_docs:
+                    batch.update(d.reference, {'deleted': 1})
+        else:
+            batch.update(doc_ref, {'deleted': 1})
+        batch.commit()
+            
+    return redirect(request.referrer or url_for('index'))
+
+@app.route('/logout')
+def logout(): session.clear(); return redirect(url_for('login'))
 
 @app.route('/main_ledger')
 def main_ledger():
@@ -1417,43 +1423,6 @@ def edit_person(id):
             doc_ref.update({'name': new_name})
     return redirect(url_for('persons'))
 
-@app.route('/delete/<string:table_name>/<string:row_id>')
-def delete_entry(table_name, row_id):
-    if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): return redirect(url_for('index'))
-    if table_name not in ['transactions', 'person_ledger', 'dasti_ledger']: return "Invalid", 400
-    
-    doc_ref = db.collection(table_name).document(row_id)
-    doc_data = doc_ref.get().to_dict()
-    
-    if doc_data and doc_data.get('user_id') == session['firm_id']:
-        link_id = doc_data.get('link_id', '')
-        if link_id:
-            for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
-                linked_docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
-                for d in linked_docs:
-                    d.reference.update({'deleted': 1})
-        else:
-            doc_ref.update({'deleted': 1})
-            
-    return redirect(request.referrer or url_for('index'))
-
-@app.route('/bulk_delete', methods=['POST'])
-def bulk_delete():
-    if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): 
-        return redirect(request.referrer or url_for('index'))
-    
-    selected_links = request.form.getlist('selected_links')
-    if not selected_links: 
-        return redirect(request.referrer or url_for('index'))
-    
-    for link_id in selected_links:
-        for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
-            docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
-            for d in docs:
-                d.reference.update({'deleted': 1})
-                
-    return redirect(request.referrer or url_for('index'))
-
 @app.route('/trash')
 def trash():
     if 'user_id' not in session or (session.get('can_view_trash') != 1 and session.get('role') != 'superadmin'): return redirect(url_for('index'))
@@ -1464,49 +1433,50 @@ def trash():
 @app.route('/restore_voucher/<string:link_id>')
 def restore_voucher(link_id):
     if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): return redirect(url_for('index'))
+    batch = db.batch()
     for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
         docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
-        for d in docs: d.reference.update({'deleted': 0})
+        for d in docs: batch.update(d.reference, {'deleted': 0})
+    batch.commit()
     return redirect(url_for('trash'))
 
 @app.route('/hard_delete_voucher/<string:link_id>')
 def hard_delete_voucher(link_id):
     if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
+    batch = db.batch()
     for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
         docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
-        for d in docs: d.reference.delete()
+        for d in docs: batch.delete(d.reference)
+    batch.commit()
     return redirect(url_for('trash'))
 
 @app.route('/bulk_restore_trash', methods=['POST'])
 def bulk_restore_trash():
     if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): 
         return redirect(url_for('index'))
-    
     selected_links = request.form.getlist('selected_links')
-    if not selected_links: 
-        return redirect(url_for('trash'))
+    if not selected_links: return redirect(url_for('trash'))
         
+    batch = db.batch()
     for link_id in selected_links:
         for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
             docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
-            for d in docs: d.reference.update({'deleted': 0})
-            
+            for d in docs: batch.update(d.reference, {'deleted': 0})
+    batch.commit()
     return redirect(url_for('trash'))
 
 @app.route('/bulk_hard_delete_trash', methods=['POST'])
 def bulk_hard_delete_trash():
-    if 'user_id' not in session or session.get('role') != 'superadmin': 
-        return redirect(url_for('index'))
-        
+    if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
     selected_links = request.form.getlist('selected_links')
-    if not selected_links: 
-        return redirect(url_for('trash'))
+    if not selected_links: return redirect(url_for('trash'))
         
+    batch = db.batch()
     for link_id in selected_links:
         for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
             docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
-            for d in docs: d.reference.delete()
-            
+            for d in docs: batch.delete(d.reference)
+    batch.commit()
     return redirect(url_for('trash'))
 
 @app.route('/reports')
@@ -1596,13 +1566,162 @@ def export_reports():
     def generate():
         data = StringIO()
         writer = csv.writer(data)
-        writer.writerow(('Date', 'Time', 'Mode', 'Category', 'Description', 'Type', 'Amount (INR)', 'Approved By'))
+        writer.writerow(('Date', 'Time', 'Mode', 'Category', 'Description', 'Type', 'Amount (INR)', 'Approved By', 'Is Flagged'))
         yield data.getvalue(); data.seek(0); data.truncate(0)
         for r in results:
-            writer.writerow((r.get('date', ''), r.get('time', ''), r.get('payment_mode', ''), r.get('category', ''), r.get('description', ''), r.get('type', ''), r.get('amount', 0), r.get('approved_by', '')))
+            writer.writerow((r.get('date', ''), r.get('time', ''), r.get('payment_mode', ''), r.get('category', ''), r.get('description', ''), r.get('type', ''), r.get('amount', 0), r.get('approved_by', ''), r.get('is_flagged', 0)))
             yield data.getvalue(); data.seek(0); data.truncate(0)
             
     return Response(generate(), mimetype='text/csv', headers={"Content-Disposition": "attachment; filename=Firm_Report_Export.csv"})
+
+@app.route('/manage_users')
+def manage_users():
+    if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
+    firm_id = session['firm_id']
+    users = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('users').where('firm_id', '==', firm_id).stream()]
+    approver_list = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('approvers').where('firm_id', '==', firm_id).stream()]
+    sys_settings = get_global_settings()
+    return render_template_string(USERS_TEMPLATE, users=users, approver_list=approver_list, sys_settings=sys_settings, username=session['username'], active_page='users')
+
+@app.route('/edit_user/<string:uid>', methods=['GET', 'POST'])
+def edit_user(uid):
+    if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
+    doc_ref = db.collection('users').document(uid)
+    user_data = doc_ref.get().to_dict()
+    if not user_data or user_data.get('firm_id') != session['firm_id']: return redirect(url_for('manage_users'))
+    
+    if request.method == 'POST':
+        username_raw = request.form['username'].strip()
+        update_data = {
+            'username': username_raw,
+            'username_lower': username_raw.lower(),
+            'role': request.form['role'],
+            'can_approve': int(request.form.get('can_approve', 0)),
+            'can_edit': int(request.form.get('can_edit', 0)),
+            'can_express_cashout': int(request.form.get('can_express_cashout', 0)),
+            'can_view_reports': int(request.form.get('can_view_reports', 0)),
+            'can_view_trash': int(request.form.get('can_view_trash', 0)),
+            'idle_timeout_minutes': int(request.form.get('idle_timeout', 15))
+        }
+        new_pw = request.form.get('password', '').strip()
+        if new_pw: update_data['password'] = new_pw.lower()
+        
+        doc_ref.update(update_data)
+        return redirect(url_for('manage_users'))
+        
+    edit_user_obj = {'id': uid, **user_data}
+    return render_template_string(EDIT_USER_TEMPLATE, edit_user=edit_user_obj, username=session['username'], active_page='users')
+
+@app.route('/edit_approver/<string:uid>', methods=['POST'])
+def edit_approver(uid):
+    if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
+    new_name = request.form.get('name', '').strip()
+    if new_name:
+        db.collection('approvers').document(uid).update({'name': new_name})
+    return redirect(url_for('manage_users'))
+
+@app.route('/delete_approver/<string:uid>')
+def delete_approver(uid):
+    if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
+    db.collection('approvers').document(uid).delete()
+    return redirect(url_for('manage_users'))
+
+@app.route('/add_user', methods=['POST'])
+def add_user():
+    if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
+    
+    username_raw = request.form['new_username'].strip()
+    password_raw = request.form['new_password'].strip().lower()
+    
+    db.collection('users').add({
+        'username': username_raw,
+        'username_lower': username_raw.lower(),
+        'password': password_raw,
+        'firm_name': session['firm_name'],
+        'firm_id': session['firm_id'],
+        'role': request.form['role'],
+        'can_approve': int(request.form.get('can_approve', 0)),
+        'can_edit': int(request.form.get('can_edit', 0)),
+        'can_express_cashout': int(request.form.get('can_express_cashout', 0)),
+        'can_view_reports': int(request.form.get('can_view_reports', 0)),
+        'can_view_trash': int(request.form.get('can_view_trash', 0)),
+        'idle_timeout_minutes': int(request.form.get('idle_timeout', 15))
+    })
+    return redirect(url_for('manage_users'))
+
+@app.route('/approvals')
+def approvals():
+    if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
+    firm_id = session['firm_id']
+    
+    pending = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', firm_id).where('status', '==', 'pending').where('deleted', '==', 0).stream()]
+    pending.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
+    
+    approved_stream = db.collection('transactions').where('user_id', '==', firm_id).where('status', '==', 'approved').where('deleted', '==', 0).stream()
+    approved = [{'id': doc.id, **doc.to_dict()} for doc in approved_stream]
+    approved.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
+    approved = approved[:100]
+    
+    approvers = get_approvers(firm_id)
+    
+    return render_template_string(APPROVALS_TEMPLATE, pending=pending, approved=approved, approver_names=approvers, username=session['username'], active_page='approvals')
+
+@app.route('/approve_voucher/<string:link_id>')
+def approve_voucher(link_id):
+    if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
+    batch = db.batch()
+    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+        docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
+        for d in docs: batch.update(d.reference, {'status': 'approved', 'approved_by': session['username']})
+    batch.commit()
+    return redirect(request.referrer or url_for('approvals'))
+
+@app.route('/reject_voucher/<string:link_id>')
+def reject_voucher(link_id):
+    if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
+    batch = db.batch()
+    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+        docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
+        for d in docs: batch.update(d.reference, {'deleted': 1})
+    batch.commit()
+    return redirect(request.referrer or url_for('approvals'))
+
+@app.route('/bulk_approve', methods=['POST'])
+def bulk_approve():
+    if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
+    start = request.form.get('start_date', '')
+    end = request.form.get('end_date', '')
+    approver = request.form.get('approved_by_select', session['username']) or session['username']
+    
+    batch = db.batch()
+    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+        docs = db.collection(collection).where('user_id', '==', session['firm_id']).where('status', '==', 'pending').where('deleted', '==', 0).stream()
+        for d in docs:
+            doc_data = d.to_dict()
+            date_val = doc_data.get('date', '')
+            if start <= date_val <= end:
+                batch.update(d.reference, {'status': 'approved', 'approved_by': approver})
+                
+    batch.commit()
+    return redirect(url_for('approvals'))
+
+@app.route('/bulk_approve_selected', methods=['POST'])
+def bulk_approve_selected():
+    if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
+    selected_links = request.form.getlist('selected_links')
+    if not selected_links: return redirect(url_for('approvals'))
+    
+    approver = request.form.get('approved_by_select', session['username']) or session['username']
+    
+    batch = db.batch()
+    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+        docs = db.collection(collection).where('user_id', '==', session['firm_id']).where('status', '==', 'pending').where('deleted', '==', 0).stream()
+        for d in docs:
+            if d.to_dict().get('link_id') in selected_links:
+                batch.update(d.reference, {'status': 'approved', 'approved_by': approver})
+                
+    batch.commit()
+    return redirect(url_for('approvals'))
 
 @app.route('/edit/<string:table_name>/<string:row_id>', methods=['GET', 'POST'])
 def edit_entry(table_name, row_id):
@@ -1670,13 +1789,19 @@ def edit_entry(table_name, row_id):
         new_status = request.form.get('status', entry.get('status'))
         approver_select = request.form.get('approved_by_select', '')
         approver_custom = request.form.get('approved_by_custom', '').strip()
+        is_flagged = int(request.form.get('is_flagged', 0))
+
         if 'status' in request.form:
             if approver_select == 'other' and approver_custom:
                 chosen_approver = approver_custom
+                check = db.collection('approvers').where('firm_id', '==', firm_id).where('name', '==', chosen_approver).get()
+                if not check:
+                    db.collection('approvers').add({'firm_id': firm_id, 'name': chosen_approver})
             elif approver_select and approver_select != 'other':
                 chosen_approver = approver_select
             else:
                 chosen_approver = entry.get('approved_by', '')
+                
             if new_status == 'approved':
                 approved_by = chosen_approver or session['username']
             else:
@@ -1685,19 +1810,32 @@ def edit_entry(table_name, row_id):
             new_status = entry.get('status')
             approved_by = entry.get('approved_by', '')
 
+        batch = db.batch()
+        
+        # --- Audit Logging Configuration ---
+        changes = []
+        if float(doc_data.get('amount', 0)) != amount: changes.append(f"Amt: ₹{doc_data.get('amount')} ➔ ₹{amount}")
+        if doc_data.get('description', '') != desc: changes.append(f"Desc: {doc_data.get('description')} ➔ {desc}")
+        if doc_data.get('category', '') != category: changes.append(f"Cat: {doc_data.get('category')} ➔ {category}")
+        if doc_data.get('payment_mode', '') != mode: changes.append(f"Mode: {doc_data.get('payment_mode')} ➔ {mode}")
+        if doc_data.get('date', '') != date_val: changes.append(f"Date: {doc_data.get('date')} ➔ {date_val}")
+        
         if has_link:
             new_account_raw = request.form.get('primary_account', 'main')
             new_account_name = request.form.get('new_account_name', '').strip()
             new_nature = request.form.get('txn_nature', current_nature)
+            
+            if current_nature != new_nature:
+                changes.append(f"Nature: {current_nature} ➔ {new_nature}")
 
             new_account_type, new_primary_id, new_person_name = 'main', None, ''
             if new_account_raw == 'new_dasti':
                 ref = db.collection('dasti_persons').document()
-                ref.set({'user_id': firm_id, 'name': new_account_name})
+                ref.set({'user_id': firm_id, 'name': new_account_name, 'deleted': 0})
                 new_primary_id, new_account_type, new_person_name = ref.id, 'dasti', new_account_name
             elif new_account_raw == 'new_person':
                 ref = db.collection('persons').document()
-                ref.set({'user_id': firm_id, 'name': new_account_name})
+                ref.set({'user_id': firm_id, 'name': new_account_name, 'deleted': 0})
                 new_primary_id, new_account_type, new_person_name = ref.id, 'person', new_account_name
             elif new_account_raw.startswith('person_'):
                 new_primary_id = new_account_raw.split('_', 1)[1]
@@ -1710,47 +1848,71 @@ def edit_entry(table_name, row_id):
                 dd = db.collection('dasti_persons').document(new_primary_id).get().to_dict()
                 new_person_name = dd.get('name', '') if dd else ''
 
+            if current_account_type != new_account_type:
+                 changes.append(f"Ledger: {current_account_type} ➔ {new_account_type}")
+
+            final_voucher_nature = new_nature
+            if new_account_type == 'main':
+                final_voucher_nature = 'direct_in' if new_nature == 'receive_cash' else 'direct_out'
+
             base_txn = {
                 'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode,
                 'category': category, 'amount': amount, 'link_id': link_id,
                 'status': new_status, 'approved_by': approved_by,
-                'deleted': entry.get('deleted', 0), 'created_at': entry.get('created_at', time.time())
+                'deleted': entry.get('deleted', 0), 'created_at': entry.get('created_at', time.time()),
+                'is_flagged': is_flagged, 'voucher_nature': final_voucher_nature
             }
 
             for coll, (did, _d) in linked_docs.items():
-                db.collection(coll).document(did).delete()
+                batch.delete(db.collection(coll).document(did))
 
             if new_account_type == 'main':
                 db_type = 'income' if new_nature == 'receive_cash' else 'expense'
-                db.collection('transactions').add({**base_txn, 'description': desc, 'type': db_type})
+                batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': db_type})
+                
             elif new_account_type == 'person':
                 if new_nature == 'slip_in':
-                    db.collection('person_ledger').add({**base_txn, 'person_id': new_primary_id, 'description': desc, 'type': 'settlement'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Slip ({new_person_name}): {desc}", 'type': 'batch_ledger_out'})
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': new_primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Slip ({new_person_name}): {desc}", 'type': 'batch_ledger_out'})
                 elif new_nature == 'advance':
-                    db.collection('person_ledger').add({**base_txn, 'person_id': new_primary_id, 'description': desc, 'type': 'advance'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Transfer Out ({new_person_name}): {desc}", 'type': 'dasti_out'})
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': new_primary_id, 'description': desc, 'type': 'advance'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Transfer Out ({new_person_name}): {desc}", 'type': 'dasti_out'})
                 elif new_nature == 'receive_cash':
-                    db.collection('person_ledger').add({**base_txn, 'person_id': new_primary_id, 'description': desc, 'type': 'settlement'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Transfer In ({new_person_name}): {desc}", 'type': 'income'})
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': new_primary_id, 'description': desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Transfer In ({new_person_name}): {desc}", 'type': 'income', 'voucher_nature': 'receive_cash'})
+                    
             elif new_account_type == 'dasti':
                 if new_nature == 'slip_in':
-                    db.collection('dasti_ledger').add({**base_txn, 'dasti_person_id': new_primary_id, 'description': desc, 'type': 'settlement'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Dasti Slip ({new_person_name}): {desc}", 'type': 'batch_ledger_out'})
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': new_primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti Slip ({new_person_name}): {desc}", 'type': 'batch_ledger_out'})
                 elif new_nature == 'advance':
-                    db.collection('dasti_ledger').add({**base_txn, 'dasti_person_id': new_primary_id, 'description': desc, 'type': 'advance'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Dasti Out ({new_person_name}): {desc}", 'type': 'dasti_voucher_out'})
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': new_primary_id, 'description': desc, 'type': 'advance'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti Out ({new_person_name}): {desc}", 'type': 'dasti_voucher_out'})
                 elif new_nature == 'receive_cash':
-                    db.collection('dasti_ledger').add({**base_txn, 'dasti_person_id': new_primary_id, 'description': desc, 'type': 'settlement'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Dasti In ({new_person_name}): {desc}", 'type': 'dasti_voucher_in'})
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': new_primary_id, 'description': desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti In ({new_person_name}): {desc}", 'type': 'dasti_voucher_in', 'voucher_nature': 'receive_cash'})
         else:
             update_data = {
                 'date': date_val, 'time': time_val, 'payment_mode': mode, 'category': category,
                 'amount': amount, 'status': new_status, 'approved_by': approved_by,
-                'description': desc, 'type': request.form.get('type', entry.get('type'))
+                'description': desc, 'type': request.form.get('type', entry.get('type')),
+                'is_flagged': is_flagged
             }
-            doc_ref.update(update_data)
+            batch.update(doc_ref, update_data)
 
+        # WRITE LOG IF CHANGES WERE MADE
+        if changes:
+            batch.set(db.collection('edit_logs').document(), {
+                'firm_id': firm_id,
+                'link_id': link_id,
+                'edited_by': session['username'],
+                'changes': " | ".join(changes),
+                'details': f"Voucher: {new_nature if has_link else request.form.get('type', entry.get('type'))} | Desc: {desc}",
+                'timestamp': int(time.time() * 1000),
+                'date_formatted': datetime.now().strftime('%d-%b-%Y %I:%M %p')
+            })
+
+        batch.commit()
         return redirect(request.referrer or url_for('index'))
 
     cats = get_categories(firm_id)
@@ -1760,151 +1922,12 @@ def edit_entry(table_name, row_id):
                                    current_account_type=current_account_type, current_primary_id=current_primary_id,
                                    current_nature=current_nature, username=session['username'])
 
-@app.route('/update_settings', methods=['POST'])
-def update_settings():
-    if session.get('role') != 'superadmin': return redirect(url_for('index'))
-    db.collection('settings').document('global_login').set({
-        'game_enabled': int(request.form.get('game_enabled', 1)),
-        'blocks_to_eat': int(request.form.get('blocks_to_eat', 4)),
-        'unlock_corner': request.form.get('unlock_corner', 'br'),
-        'game_speed': int(request.form.get('game_speed', 0))
-    })
-    return redirect(url_for('manage_users'))
-
-@app.route('/manage_users')
-def manage_users():
-    if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
-    users = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('users').where('firm_id', '==', session['firm_id']).stream()]
-    sys_settings = get_global_settings()
-    return render_template_string(USERS_TEMPLATE, users=users, sys_settings=sys_settings, username=session['username'], active_page='users')
-
-@app.route('/edit_user/<string:uid>', methods=['GET', 'POST'])
-def edit_user(uid):
-    if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
-    
-    doc_ref = db.collection('users').document(uid)
-    user_data = doc_ref.get().to_dict()
-    if not user_data or user_data.get('firm_id') != session['firm_id']: return redirect(url_for('manage_users'))
-    
-    if request.method == 'POST':
-        username_raw = request.form['username'].strip()
-        update_data = {
-            'username': username_raw,
-            'username_lower': username_raw.lower(),
-            'role': request.form['role'],
-            'can_approve': int(request.form.get('can_approve', 0)),
-            'can_edit': int(request.form.get('can_edit', 0)),
-            'can_express_cashout': int(request.form.get('can_express_cashout', 0)),
-            'can_view_reports': int(request.form.get('can_view_reports', 0)),
-            'can_view_trash': int(request.form.get('can_view_trash', 0)),
-            'idle_timeout_minutes': int(request.form.get('idle_timeout', 15))
-        }
-        new_pw = request.form.get('password', '').strip()
-        if new_pw: update_data['password'] = new_pw.lower()
-        
-        doc_ref.update(update_data)
-        return redirect(url_for('manage_users'))
-        
-    edit_user_obj = {'id': uid, **user_data}
-    return render_template_string(EDIT_USER_TEMPLATE, edit_user=edit_user_obj, username=session['username'], active_page='users')
-
-@app.route('/add_user', methods=['POST'])
-def add_user():
-    if 'user_id' not in session or session.get('role') != 'superadmin': return redirect(url_for('index'))
-    
-    username_raw = request.form['new_username'].strip()
-    password_raw = request.form['new_password'].strip().lower()
-    
-    db.collection('users').add({
-        'username': username_raw,
-        'username_lower': username_raw.lower(),
-        'password': password_raw,
-        'firm_name': session['firm_name'],
-        'firm_id': session['firm_id'],
-        'role': request.form['role'],
-        'can_approve': int(request.form.get('can_approve', 0)),
-        'can_edit': int(request.form.get('can_edit', 0)),
-        'can_express_cashout': int(request.form.get('can_express_cashout', 0)),
-        'can_view_reports': int(request.form.get('can_view_reports', 0)),
-        'can_view_trash': int(request.form.get('can_view_trash', 0)),
-        'idle_timeout_minutes': int(request.form.get('idle_timeout', 15))
-    })
-    return redirect(url_for('manage_users'))
-
-@app.route('/approvals')
-def approvals():
-    if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
-    firm_id = session['firm_id']
-    
-    pending = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', firm_id).where('status', '==', 'pending').where('deleted', '==', 0).stream()]
-    pending.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
-    
-    approved_stream = db.collection('transactions').where('user_id', '==', firm_id).where('status', '==', 'approved').where('deleted', '==', 0).stream()
-    approved = [{'id': doc.id, **doc.to_dict()} for doc in approved_stream]
-    approved.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
-    approved = approved[:100]
-    
-    approvers = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('users').where('firm_id', '==', firm_id).stream()]
-    approvers.sort(key=lambda x: x.get('username', ''))
-    
-    return render_template_string(APPROVALS_TEMPLATE, pending=pending, approved=approved, approvers=approvers, username=session['username'], active_page='approvals')
-
-@app.route('/approve_voucher/<string:link_id>')
-def approve_voucher(link_id):
-    if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
-    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
-        docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
-        for d in docs: d.reference.update({'status': 'approved', 'approved_by': session['username']})
-    return redirect(request.referrer or url_for('approvals'))
-
-@app.route('/reject_voucher/<string:link_id>')
-def reject_voucher(link_id):
-    if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
-    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
-        docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
-        for d in docs: d.reference.update({'deleted': 1})
-    return redirect(request.referrer or url_for('approvals'))
-
-@app.route('/bulk_approve', methods=['POST'])
-def bulk_approve():
-    if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
-    start = request.form.get('start_date', '')
-    end = request.form.get('end_date', '')
-    approver = request.form.get('approved_by_select', session['username']) or session['username']
-    
-    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
-        docs = db.collection(collection).where('user_id', '==', session['firm_id']).where('status', '==', 'pending').where('deleted', '==', 0).stream()
-        for d in docs:
-            doc_data = d.to_dict()
-            date_val = doc_data.get('date', '')
-            if start <= date_val <= end:
-                d.reference.update({'status': 'approved', 'approved_by': approver})
-                
-    return redirect(url_for('approvals'))
-
-@app.route('/bulk_approve_selected', methods=['POST'])
-def bulk_approve_selected():
-    if 'user_id' not in session or session.get('can_approve') != 1: return redirect(url_for('index'))
-    selected_links = request.form.getlist('selected_links')
-    if not selected_links: return redirect(url_for('approvals'))
-    
-    approver = request.form.get('approved_by_select', session['username']) or session['username']
-    
-    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
-        docs = db.collection(collection).where('user_id', '==', session['firm_id']).where('status', '==', 'pending').where('deleted', '==', 0).stream()
-        for d in docs:
-            if d.to_dict().get('link_id') in selected_links:
-                d.reference.update({'status': 'approved', 'approved_by': approver})
-                
-    return redirect(url_for('approvals'))
-
 @app.route('/add_express', methods=['POST'])
 def add_express():
     if 'user_id' not in session: return redirect(url_for('login'))
     
     txn_status = 'pending'
     approver = ''
-    
     db.collection('transactions').add({
         'user_id': session['firm_id'],
         'date': request.form['date'],
@@ -1918,120 +1941,11 @@ def add_express():
         'status': txn_status,
         'approved_by': approver,
         'deleted': 0,
-        'created_at': time.time()
+        'created_at': time.time(),
+        'voucher_nature': 'direct_in' if request.form['type'] == 'income' else 'direct_out',
+        'is_flagged': 0
     })
     return redirect(request.referrer or url_for('index'))
-
-@app.route('/add_batch_unified', methods=['POST'])
-def add_batch_unified():
-    if 'user_id' not in session: return redirect(url_for('login'))
-    firm_id = session['firm_id']
-    date_val, time_val, mode, txn_nature = request.form['date'], request.form['time'], request.form['payment_mode'], request.form['txn_nature']
-    primary_account_raw = request.form['primary_account']
-    new_account_name = request.form.get('new_account_name', '').strip()
-    
-    cats, cust_cats, descs, amts = request.form.getlist('category[]'), request.form.getlist('custom_category[]'), request.form.getlist('description[]'), request.form.getlist('amount[]')
-    
-    txn_status = 'pending'
-    approver = ''
-    
-    existing_cats = get_categories(firm_id)
-    account_type = 'main'
-    primary_id = None
-    person_name = ''
-    
-    if primary_account_raw == 'new_dasti':
-        new_ref = db.collection('dasti_persons').document()
-        new_ref.set({'user_id': firm_id, 'name': new_account_name})
-        primary_id = new_ref.id
-        account_type, person_name = 'dasti', new_account_name
-    elif primary_account_raw == 'new_person':
-        new_ref = db.collection('persons').document()
-        new_ref.set({'user_id': firm_id, 'name': new_account_name})
-        primary_id = new_ref.id
-        account_type, person_name = 'person', new_account_name
-    elif primary_account_raw.startswith('person_'):
-        primary_id = primary_account_raw.split('_')[1]
-        account_type = 'person'
-        person_name = db.collection('persons').document(primary_id).get().to_dict().get('name', '')
-    elif primary_account_raw.startswith('dasti_'):
-        primary_id = primary_account_raw.split('_')[1]
-        account_type = 'dasti'
-        person_name = db.collection('dasti_persons').document(primary_id).get().to_dict().get('name', '')
-        
-    for i in range(len(descs)):
-        if amts[i].strip() and float(amts[i]) >= 0:
-            amt, desc = float(amts[i]), descs[i].strip()
-            cat = cust_cats[i].strip() if cats[i] == 'Other' and cust_cats[i].strip() else cats[i]
-            if cat not in existing_cats:
-                db.collection('categories').add({'firm_id': firm_id, 'name': cat})
-                existing_cats.append(cat)
-                
-            link_id = uuid.uuid4().hex[:12]
-            
-            base_txn = {'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode, 'category': cat, 'amount': amt, 'link_id': link_id, 'status': txn_status, 'approved_by': approver, 'deleted': 0, 'created_at': time.time()}
-
-            if account_type == 'main':
-                db_type = 'income' if txn_nature == 'receive_cash' else 'expense'
-                db.collection('transactions').add({**base_txn, 'description': desc, 'type': db_type})
-                
-            elif account_type == 'person':
-                if txn_nature == 'slip_in':
-                    db.collection('person_ledger').add({**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'settlement'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Slip ({person_name}): {desc}", 'type': 'batch_ledger_out'})
-                elif txn_nature == 'advance':
-                    db.collection('person_ledger').add({**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'advance'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Transfer Out ({person_name}): {desc}", 'type': 'dasti_out'})
-                elif txn_nature == 'receive_cash':
-                    db.collection('person_ledger').add({**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'settlement'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Transfer In ({person_name}): {desc}", 'type': 'income'})
-                    
-            elif account_type == 'dasti':
-                if txn_nature == 'slip_in':
-                    db.collection('dasti_ledger').add({**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'settlement'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Dasti Slip ({person_name}): {desc}", 'type': 'batch_ledger_out'})
-                elif txn_nature == 'advance':
-                    db.collection('dasti_ledger').add({**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'advance'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Dasti Out ({person_name}): {desc}", 'type': 'dasti_voucher_out'})
-                elif txn_nature == 'receive_cash':
-                    db.collection('dasti_ledger').add({**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'settlement'})
-                    db.collection('transactions').add({**base_txn, 'description': f"Dasti In ({person_name}): {desc}", 'type': 'dasti_voucher_in'})
-                    
-    return redirect(request.referrer or url_for('index'))
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if not has_users(): return redirect(url_for('register'))
-    if request.method == 'POST':
-        username_lower = request.form['username'].strip().lower()
-        password_lower = request.form['password'].strip().lower()
-        
-        users_stream = db.collection('users').where('username_lower', '==', username_lower).stream()
-        user_doc = next(users_stream, None)
-        
-        if user_doc:
-            user = user_doc.to_dict()
-            if user.get('password') == password_lower:
-                session['user_id'] = user_doc.id
-                session['username'] = user['username']
-                session['firm_name'] = user['firm_name']
-                session['firm_id'] = user.get('firm_id', user_doc.id)
-                session['role'] = user.get('role', 'superadmin')
-                
-                session['can_approve'] = user.get('can_approve', 0)
-                session['can_edit'] = user.get('can_edit', 0)
-                session['can_express_cashout'] = user.get('can_express_cashout', 0)
-                session['can_view_reports'] = user.get('can_view_reports', 0)
-                session['can_view_trash'] = user.get('can_view_trash', 0)
-                session['idle_timeout'] = user.get('idle_timeout_minutes', 15)
-                
-                if session['role'] == 'superadmin':
-                    session['can_approve'] = session['can_edit'] = session['can_view_reports'] = session['can_view_trash'] = 1
-                    
-                return redirect(url_for('index'))
-                
-    settings = get_global_settings()
-    return render_template_string(LOGIN_TEMPLATE, settings=settings, is_demo=False)
 
 @app.route('/demo_game')
 def demo_game():
@@ -2092,14 +2006,32 @@ def register():
                 'status': 'approved',
                 'approved_by': session['username'],
                 'deleted': 0,
-                'created_at': time.time()
+                'created_at': time.time(),
+                'voucher_nature': 'direct_in',
+                'is_flagged': 0
             })
             
         return redirect(url_for('index'))
     return render_template_string(REGISTER_TEMPLATE)
 
-@app.route('/logout')
-def logout(): session.clear(); return redirect(url_for('login'))
+@app.route('/bulk_delete', methods=['POST'])
+def bulk_delete():
+    if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): 
+        return redirect(request.referrer or url_for('index'))
+    
+    selected_links = request.form.getlist('selected_links')
+    if not selected_links: 
+        return redirect(request.referrer or url_for('index'))
+    
+    batch = db.batch()
+    for link_id in selected_links:
+        for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+            docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
+            for d in docs:
+                batch.update(d.reference, {'deleted': 1})
+                
+    batch.commit()
+    return redirect(request.referrer or url_for('index'))
 
 if __name__ == '__main__':
     pass

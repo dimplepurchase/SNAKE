@@ -992,6 +992,343 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
     </div>
 </body></html>'''
 
+TRASH_TEMPLATE = '''<!DOCTYPE html><html><head><title>Trash / Recycle Bin</title>''' + BASE_STYLE + '''</head><body>
+    <div class="container">''' + NAVBAR_HTML + '''
+        <div class="card" style="padding: 0;">
+            <h3 style="padding: 15px 20px; margin: 0; background: #fee2e2; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #991b1b;">🗑️ Deleted Vouchers & Entries (Trash)</h3>
+            <form method="POST">
+                <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; gap: 10px;">
+                    <button type="submit" formaction="/bulk_restore_trash" class="btn btn-success btn-sm" onclick="return confirm('Restore selected entries?');">♻️ Restore Selected</button>
+                    <button type="submit" formaction="/bulk_hard_delete_trash" class="btn btn-sm" style="background:#dc2626; color:white;" onclick="return confirm('Permanently delete selected? This cannot be undone.');">🔥 Delete Selected Forever</button>
+                </div>
+                <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th><th>Date & Time</th><th>Category / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>
+                    {% for t in trashed %}<tr>
+                        <td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
+                        <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
+                        <td><span class="badge badge-mode">{{ t.category }}</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
+                        <td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td>
+                        <td style="text-align: center;">
+                            <a href="/restore_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Restore this transaction?');">♻️</a>
+                            <a href="/hard_delete_voucher/{{ t.link_id }}" class="btn btn-sm" style="background:#dc2626; color:white; margin-left:5px;" onclick="return confirm('Permanently delete? This cannot be undone.');">🔥</a>
+                        </td>
+                    </tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">Trash is empty.</td></tr>{% endfor %}
+                </table>
+            </form>
+        </div>
+    </div></body></html>'''
+
+REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dynamic Reports</title>''' + BASE_STYLE + '''</head><body>
+    <div class="container">''' + NAVBAR_HTML + '''
+        <div class="card no-print" style="padding: 25px; margin-bottom: 25px;">
+            <h3 style="margin-bottom: 15px; font-size: 1.3em;">📊 Generate Report</h3>
+            <form method="GET" action="/reports" style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end;">
+                <div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}"></div>
+                <div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" value="{{ end_date }}"></div>
+                <div class="form-group flex-1" style="min-width: 200px;"><label>Category Filter</label>
+                    <select name="category">
+                        <option value="">-- All Categories --</option>
+                        {% for c in categories %}<option value="{{ c }}" {% if category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="form-group flex-1" style="min-width: 250px;"><label>Select Account / Ledger</label>
+                    <select name="report_account" style="font-weight:bold; color:var(--primary);">
+                        <option value="main" {% if report_account == 'main' %}selected{% endif %}>🏢 Main Cash Book</option>
+                        <optgroup label="👥 Person Ledgers">
+                            {% for p in persons %}<option value="person_{{ p.id }}" {% if report_account == 'person_'~p.id|string %}selected{% endif %}>👤 {{ p.name }}</option>{% endfor %}
+                        </optgroup>
+                        <optgroup label="💸 Dasti Ledgers">
+                            {% for d in dasti_persons %}<option value="dasti_{{ d.id }}" {% if report_account == 'dasti_'~d.id|string %}selected{% endif %}>💸 {{ d.name }}</option>{% endfor %}
+                        </optgroup>
+                    </select>
+                </div>
+                <button class="btn-success" type="submit" style="padding: 10px 25px; height: 45px;">Generate</button>
+            </form>
+        </div>
+
+        <div class="no-print" style="margin-bottom: 20px; display: flex; gap: 10px; justify-content: flex-end;">
+            <button onclick="window.print()" class="btn btn-outline" style="background: white;">🖨️ Print Report</button>
+            <a href="{{ url_for('export_reports', start_date=start_date, end_date=end_date, category=category, report_account=report_account) }}" class="btn btn-success" style="background: #10b981;">📥 Download Excel (CSV)</a>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Report Incomes / Received</h4><div class="value" style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in) }}</div></div>
+            <div class="stat-card" style="border-top: 4px solid var(--danger);"><h4>Report Expenses / Advances</h4><div class="value" style="color: var(--danger);">- ₹{{ "{:,.2f}".format(total_out) }}</div></div>
+            <div class="stat-card" style="border-top: 4px solid var(--primary); background: #f8fafc;"><h4>Report Net Flow</h4><div class="value">{% if (total_in - total_out) >= 0 %}<span style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in - total_out) }}</span>{% else %}<span style="color: var(--danger);">- ₹{{ "{:,.2f}".format((total_in - total_out)|abs) }}</span>{% endif %}</div></div>
+        </div>
+
+        <div class="card" style="padding: 0; overflow-x: auto;">
+            <h3 style="padding: 18px 25px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border);">Report Results</h3>
+            <table style="width: 100%; min-width: 800px;">
+                <thead><tr><th style="padding-left: 25px; width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 50%;">Detail</th><th style="text-align: right; width: 20%;">Amount</th></tr></thead>
+                <tbody>
+                    {% for txn in results %}<tr>
+                        <td style="padding-left: 25px;"><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
+                        <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
+                        <td style="white-space: pre-wrap;">{{ txn.description }}
+                            {% if txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
+                            {% if txn.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
+                        </td>
+                        <td style="text-align: right;">
+                            {% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'advance'] %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(txn.amount) }}</span>
+                            {% else %}<span class="badge badge-in">+ ₹{{ "{:,.2f}".format(txn.amount) }}</span>{% endif %}
+                        </td>
+                    </tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No records found.</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div></body></html>'''
+
+MAIN_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Ledger</title>''' + BASE_STYLE + '''</head><body>
+    <div class="container">''' + NAVBAR_HTML + '''
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2 style="margin: 0; font-size: 1.6em;">🏢 Main Cash Book Complete Ledger</h2>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Received (+ In)</h4><div class="value" style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in) }}</div></div>
+            <div class="stat-card" style="border-top: 4px solid var(--danger);"><h4>Total Payments & Advances (- Out)</h4><div class="value" style="color: var(--danger);">- ₹{{ "{:,.2f}".format(total_out + total_dasti + total_dasti_vouchers) }}</div></div>
+            <div class="stat-card" style="border-top: 4px solid var(--primary); background: #f8fafc;"><h4>Available Balance</h4><div class="value">
+                {% if balance >= 0 %}<span style="color: var(--success);">₹{{ "{:,.2f}".format(balance) }}</span>
+                {% else %}<span style="color: var(--danger);">₹{{ "{:,.2f}".format(balance) }}</span>{% endif %}
+            </div></div>
+        </div>
+        
+        <div class="card" style="padding: 0; overflow-x: auto;">
+            <div style="padding: 15px 25px; background: #f8fafc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                <h3 style="margin: 0;">Detailed Transaction History</h3>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" class="btn btn-sm btn-outline" onclick="filterLedger('all')">📜 All Entries</button>
+                    <button type="button" class="btn btn-sm" style="background: #d1fae5; color: #065f46;" onclick="filterLedger('in')">📥 Credit (In)</button>
+                    <button type="button" class="btn btn-sm" style="background: #fee2e2; color: #991b1b;" onclick="filterLedger('out')">📤 Debit (Out)</button>
+                </div>
+            </div>
+            
+            <form action="/bulk_delete" method="POST" onsubmit="return confirm('Are you sure you want to delete the selected entries?');">
+                <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border);">
+                    <button type="submit" class="btn btn-danger btn-sm">🗑️ Delete Selected Entries</button>
+                </div>
+                <table style="width: 100%; min-width: 900px;">
+                    <thead><tr>
+                        <th style="padding-left: 25px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th>
+                        <th style="width: 5%;">Sr.</th>
+                        <th style="width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 40%;">Bill No / Details & Link</th><th style="text-align: right; width: 10%;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th style="text-align: center; width: 10%;">Act</th>{% endif %}
+                    </tr></thead>
+                    <tbody>
+                        {% for txn in txns %}
+                        <tr class="ledger-row" data-type="{% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out'] %}out{% else %}in{% endif %}">
+                            <td style="padding-left: 25px;"><input type="checkbox" name="selected_links" value="{{ txn.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
+                            <td style="font-weight: bold; color: #64748b;">{{ loop.index }}</td>
+                            <td><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
+                            <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
+                            <td style="white-space: pre-wrap;">{{ txn.description }}
+                                {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
+                                {% if txn.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
+                            </td>
+                            <td style="text-align: right;">
+                                {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
+                                {% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out'] %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>({% if txn.type == 'dasti_out' %}Transfer Out{% elif txn.type == 'batch_ledger_out' %}Ledger Slip Out{% elif txn.type == 'dasti_voucher_out' %}Dasti Advance Out{% else %}Payment Out{% endif %})</small></span>
+                                {% else %}<span class="badge badge-in">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Receipt/In)</small></span>{% endif %}
+                            </td>
+                            {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
+                            <td style="text-align: center;"><a href="/edit/transactions/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/transactions/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
+                            {% endif %}
+                        </tr>{% else %}<tr><td colspan="7" style="text-align:center; color:#9ca3af; padding: 40px;">No entries found in Main Cash Book.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </form>
+        </div>
+    </div>
+    <script>
+        function filterLedger(type) {
+            const rows = document.querySelectorAll('.ledger-row');
+            rows.forEach(row => {
+                if (type === 'all' || row.dataset.type === type) row.style.display = '';
+                else row.style.display = 'none';
+            });
+        }
+    </script>
+</body></html>'''
+
+PERSONS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Person Ledgers</title>''' + BASE_STYLE + '''</head><body>
+    <div class="container">''' + NAVBAR_HTML + '''
+        <div class="card" style="padding: 0;">
+            <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📊 Outstanding Balances & Person Ledgers</h3>
+            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; font-size: 1em;">Name</th><th style="text-align: right; font-size: 1em;">Net Status</th><th style="text-align: center; width: 220px; padding-right: 20px; font-size: 1em;">Action</th></tr>
+                {% for b in balances %}<tr>
+                    <td style="padding-left: 20px; font-weight: 500; font-size: 1.1em;">{{ b.name }}</td>
+                    <td style="text-align: right;">{% if b.net > 0 %}<span class="badge badge-primary" style="font-size: 1em; padding: 6px 12px; background: #e0e7ff; color: #3730a3; border-radius: 8px;">+ ₹{{ "{:,.2f}".format(b.net) }} (Owes Firm)</span>{% elif b.net < 0 %}<span class="badge badge-success" style="font-size: 1em; padding: 6px 12px; background: #d1fae5; color: #065f46; border-radius: 8px;">- ₹{{ "{:,.2f}".format(b.net|abs) }} (Firm Owes)</span>{% else %}<span style="color: #9ca3af; font-weight: 600;">✓ Settled</span>{% endif %}</td>
+                    <td style="text-align: center; padding-right: 20px;">
+                        <a href="/person_account/{{ b.id }}" class="btn btn-outline btn-sm">View</a>
+                        {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
+                        <button onclick="let n=prompt('Edit Name:', '{{ b.name }}'); if(n) window.location='/edit_person/{{ b.id }}?name='+encodeURIComponent(n);" class="btn btn-sm" style="background:#f59e0b; color:white;">✏️</button>
+                        {% endif %}
+                    </td>
+                </tr>{% else %}<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding: 40px;">No active profiles. Create one from the Dashboard Batch Entry!</td></tr>{% endfor %}
+            </table>
+        </div>
+    </div></body></html>'''
+
+PERSON_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Account: {{ person.name }}</title>''' + BASE_STYLE + '''</head><body>
+    <div class="container">''' + NAVBAR_HTML + '''
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;"><a href="/persons" class="btn-outline" style="text-decoration: none; padding: 8px 15px; border-radius: 8px; font-size: 0.9em;">← Back to Ledgers</a><h2 style="margin: 0; font-size: 1.6em;">Person Ledger: <span style="color: var(--primary);">{{ person.name }}</span></h2></div>
+        <div class="stats-grid">
+            <div class="stat-card" style="border-top: 4px solid var(--primary);"><h4>Total Advances (Received from Main)</h4><div class="value" style="color: var(--primary);">+ ₹{{ "{:,.2f}".format(advances) }}</div></div>
+            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Slips / Settlements</h4><div class="value" style="color: var(--success);">- ₹{{ "{:,.2f}".format(settlements) }}</div></div>
+            <div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: var(--primary);">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %}<span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div>
+        </div>
+        
+        <div class="card" style="padding: 0; overflow-x: auto;">
+            <div style="padding: 15px 25px; background: #f8fafc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                <h3 style="margin: 0;">Detailed Transaction History</h3>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" class="btn btn-sm btn-outline" onclick="filterLedger('all')">📜 All Entries</button>
+                    <button type="button" class="btn btn-sm" style="background: #e0e7ff; color: #3730a3;" onclick="filterLedger('in')">📥 Advance Given (+)</button>
+                    <button type="button" class="btn btn-sm" style="background: #d1fae5; color: #065f46;" onclick="filterLedger('out')">📤 Slip Settled (-)</button>
+                </div>
+            </div>
+            
+            <form action="/bulk_delete" method="POST" onsubmit="return confirm('Are you sure you want to delete the selected entries?');">
+                <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border);">
+                    <button type="submit" class="btn btn-danger btn-sm">🗑️ Delete Selected Entries</button>
+                </div>
+                <table style="width: 100%; min-width: 900px;">
+                    <thead><tr>
+                        <th style="padding-left: 25px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th>
+                        <th style="width: 5%;">Sr.</th>
+                        <th style="width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 40%;">Bill No / Details & Link</th><th style="text-align: right; width: 10%;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th style="text-align: center; width: 10%;">Act</th>{% endif %}
+                    </tr></thead>
+                    <tbody>
+                        {% for txn in txns %}
+                        <tr class="ledger-row" data-type="{% if txn.type == 'advance' %}in{% else %}out{% endif %}">
+                            <td style="padding-left: 25px;"><input type="checkbox" name="selected_links" value="{{ txn.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
+                            <td style="font-weight: bold; color: #64748b;">{{ loop.index }}</td>
+                            <td><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
+                            <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
+                            <td style="white-space: pre-wrap;">{{ txn.description }}
+                                {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
+                                {% if txn.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
+                            </td>
+                            <td style="text-align: right;">
+                                {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
+                                {% if txn.type == 'advance' %}<span class="badge badge-in" style="background:#e0e7ff; color:#3730a3;">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Advance)</small></span>
+                                {% else %}<span class="badge badge-out" style="background:#d1fae5; color:#065f46;">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Slip / Settle)</small></span>{% endif %}
+                            </td>
+                            {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
+                            <td style="text-align: center;"><a href="/edit/person_ledger/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/person_ledger/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
+                            {% endif %}
+                        </tr>{% else %}<tr><td colspan="7" style="text-align:center; color:#9ca3af; padding: 40px;">No historical entries found for this person.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </form>
+        </div>
+    </div>
+    <script>
+        function filterLedger(type) {
+            const rows = document.querySelectorAll('.ledger-row');
+            rows.forEach(row => {
+                if (type === 'all' || row.dataset.type === type) row.style.display = '';
+                else row.style.display = 'none';
+            });
+        }
+    </script>
+</body></html>'''
+
+DASTI_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Ledger</title>''' + BASE_STYLE + '''</head><body>
+    <div class="container">''' + NAVBAR_HTML + '''
+        
+        <div class="card balance-card" style="margin-bottom: 25px;">
+            <h2 style="color: #64748b; font-size: 1.1em; text-transform: uppercase; margin-bottom: 0;">🏢 Available Main Cash Book Balance</h2>
+            <div class="balance-amount" style="color: {{ 'var(--success)' if balance >= 0 else 'var(--danger)' }}">₹{{ "{:,.2f}".format(balance) }}</div>
+            
+            <div style="display: flex; justify-content: center; margin-top: 15px;">
+                <div style="color: #0369a1; background: #e0f2fe; padding: 10px 15px; border-radius: 8px; border: 1px solid #bae6fd; min-width: 250px;">
+                    <strong style="font-size: 0.85em; color: #0284c7; text-transform: uppercase;">💸 Total Dasti Balance (Outstanding)</strong><br>
+                    <span style="font-size: 1.2em; font-weight: bold;">₹{{ "{:,.2f}".format(total_outstanding_dasti) }}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card no-print" style="padding: 0;">
+            <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📊 Outstanding Dasti Accounts</h3>
+            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; font-size: 1em;">Dasti Name</th><th style="text-align: right; font-size: 1em;">Net Status</th><th style="text-align: center; width: 220px; padding-right: 20px; font-size: 1em;">Action</th></tr>
+                {% for b in balances %}<tr>
+                    <td style="padding-left: 20px; font-weight: 500; font-size: 1.1em;">{{ b.name }}</td>
+                    <td style="text-align: right;">{% if b.net > 0 %}<span class="badge badge-primary" style="font-size: 1em; padding: 6px 12px; background: #e0f2fe; color: #0369a1; border-radius: 8px;">+ ₹{{ "{:,.2f}".format(b.net) }} (Owes Firm)</span>{% elif b.net < 0 %}<span class="badge badge-success" style="font-size: 1em; padding: 6px 12px; background: #d1fae5; color: #065f46; border-radius: 8px;">- ₹{{ "{:,.2f}".format(b.net|abs) }} (Firm Owes)</span>{% else %}<span style="color: #9ca3af; font-weight: 600;">✓ Settled</span>{% endif %}</td>
+                    <td style="text-align: center; padding-right: 20px;">
+                        <a href="/dasti_account/{{ b.id }}" class="btn btn-outline btn-sm">View</a>
+                        {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
+                        <button onclick="let n=prompt('Edit Name:', '{{ b.name }}'); if(n) window.location='/edit_dasti_person/{{ b.id }}?name='+encodeURIComponent(n);" class="btn btn-sm" style="background:#f59e0b; color:white;">✏️</button>
+                        {% endif %}
+                    </td>
+                </tr>{% else %}<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding: 40px;">No active Dasti accounts yet. Type a name in the Master Batch voucher to create one!</td></tr>{% endfor %}
+            </table>
+        </div>
+    </div></body></html>'''
+
+DASTI_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Account: {{ person.name }}</title>''' + BASE_STYLE + '''</head><body>
+    <div class="container">''' + NAVBAR_HTML + '''
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;"><a href="/dasti_ledger" class="btn-outline" style="text-decoration: none; padding: 8px 15px; border-radius: 8px; font-size: 0.9em;">← Back to Dasti Ledgers</a><h2 style="margin: 0; font-size: 1.6em;">Dasti Ledger: <span style="color: #0ea5e9;">{{ person.name }}</span></h2></div>
+        <div class="stats-grid">
+            <div class="stat-card" style="border-top: 4px solid #0ea5e9;"><h4>Total Advances (Given Out)</h4><div class="value" style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(advances) }}</div></div>
+            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Slips / Settlements</h4><div class="value" style="color: var(--success);">- ₹{{ "{:,.2f}".format(settlements) }}</div></div>
+            <div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %}<span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div>
+        </div>
+        
+        <div class="card" style="padding: 0; overflow-x: auto;">
+            <div style="padding: 15px 25px; background: #f8fafc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                <h3 style="margin: 0;">Detailed Transaction History</h3>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" class="btn btn-sm btn-outline" onclick="filterLedger('all')">📜 All Entries</button>
+                    <button type="button" class="btn btn-sm" style="background: #e0f2fe; color: #0369a1;" onclick="filterLedger('in')">📥 Advance Given (+)</button>
+                    <button type="button" class="btn btn-sm" style="background: #d1fae5; color: #065f46;" onclick="filterLedger('out')">📤 Slip Settled (-)</button>
+                </div>
+            </div>
+
+            <form action="/bulk_delete" method="POST" onsubmit="return confirm('Are you sure you want to delete the selected entries?');">
+                <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border);">
+                    <button type="submit" class="btn btn-danger btn-sm">🗑️ Delete Selected Entries</button>
+                </div>
+                <table style="width: 100%; min-width: 900px;">
+                    <thead><tr>
+                        <th style="padding-left: 25px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th>
+                        <th style="width: 5%;">Sr.</th>
+                        <th style="width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 40%;">Dasti Detail & Link</th><th style="text-align: right; width: 10%;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th style="text-align: center; width: 10%;">Act</th>{% endif %}
+                    </tr></thead>
+                    <tbody>
+                        {% for txn in txns %}
+                        <tr class="ledger-row" data-type="{% if txn.type == 'advance' %}in{% else %}out{% endif %}">
+                            <td style="padding-left: 25px;"><input type="checkbox" name="selected_links" value="{{ txn.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
+                            <td style="font-weight: bold; color: #64748b;">{{ loop.index }}</td>
+                            <td><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
+                            <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
+                            <td style="white-space: pre-wrap;">{{ txn.description }}
+                                {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
+                                {% if txn.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
+                            </td>
+                            <td style="text-align: right;">
+                                {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
+                                {% if txn.type == 'advance' %}<span class="badge badge-in" style="background:#e0f2fe; color:#0369a1;">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Advance Given)</small></span>
+                                {% else %}<span class="badge badge-out" style="background:#d1fae5; color:#065f46;">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Slip / Settle)</small></span>{% endif %}
+                            </td>
+                            {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
+                            <td style="text-align: center;"><a href="/edit/dasti_ledger/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/dasti_ledger/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
+                            {% endif %}
+                        </tr>{% else %}<tr><td colspan="7" style="text-align:center; color:#9ca3af; padding: 40px;">No historical entries found for this person.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </form>
+        </div>
+    </div>
+    <script>
+        function filterLedger(type) {
+            const rows = document.querySelectorAll('.ledger-row');
+            rows.forEach(row => {
+                if (type === 'all' || row.dataset.type === type) row.style.display = '';
+                else row.style.display = 'none';
+            });
+        }
+    </script>
+</body></html>'''
+
 # --- FIREBASE HELPER LOGIC ---
 def has_users():
     docs = db.collection('users').limit(1).stream()

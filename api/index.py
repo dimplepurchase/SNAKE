@@ -1,7 +1,7 @@
 import os
 import json
 from flask import Flask, render_template_string, request, redirect, url_for, session, Response
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time, uuid, csv
 from io import StringIO
 
@@ -10,6 +10,9 @@ from firebase_admin import credentials, firestore
 
 app = Flask(__name__)
 app.secret_key = 'cashbook_secure_secret_key_12345'
+
+# --- IST TIMEZONE SETUP ---
+IST = timezone(timedelta(hours=5, minutes=30))
 
 # --- FIREBASE SECURE INITIALIZATION ---
 try:
@@ -101,17 +104,19 @@ BASE_STYLE = '''
     .badge-mode { background-color: #e0e7ff; color: #3730a3; font-size: 0.8em; margin-bottom: 4px; border: 1px solid #c7d2fe; }
     .flex-row { display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end; }
     .flex-1 { flex: 1; }
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 25px; }
-    .stat-card { background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--border); text-align: center; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; margin-bottom: 25px; }
+    .stat-card { background: #fff; padding: 20px; border-radius: 12px; border: 1px solid var(--border); text-align: center; transition: 0.2s; }
+    .stat-card:hover.clickable { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,0.1); border-color: var(--primary); }
     .stat-card h4 { color: #6b7280; margin: 0 0 8px 0; font-size: 0.85em; text-transform: uppercase; }
     .stat-card .value { font-size: 1.6em; font-weight: 700; }
+    .pagination-controls { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: #f8fafc; border-top: 1px solid var(--border); }
     
     #splash-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #4f46e5, #3b82f6); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; transition: opacity 0.5s ease; }
     .splash-firm { font-size: 3.5em; font-weight: 700; margin-bottom: 10px; animation: popIn 0.8s ease; text-transform: uppercase; letter-spacing: 2px;}
     .splash-user { font-size: 1.5em; font-weight: 300; animation: popIn 1.2s ease; }
     @keyframes popIn { 0% { opacity: 0; transform: translateY(20px); } 100% { opacity: 1; transform: translateY(0); } }
     
-    @media print { .no-print, .navbar, .card form, button, select { display: none !important; } body { background: white; color: black; } .card { box-shadow: none; border: none; margin: 0; padding: 0; } }
+    @media print { .no-print, .navbar, .card form, button, select, .pagination-controls { display: none !important; } body { background: white; color: black; } .card { box-shadow: none; border: none; margin: 0; padding: 0; } table tr { display: table-row !important; } }
 </style>
 <script>
     let isDirty = false;
@@ -123,6 +128,8 @@ BASE_STYLE = '''
         document.querySelectorAll('input[type="time"]').forEach(el => { if(!el.value) el.value = timeString; });
         if(document.getElementById('express_date')) document.getElementById('express_date').value = dateString;
         if(document.getElementById('express_time')) document.getElementById('express_time').value = timeString;
+        document.querySelectorAll('.auto-date').forEach(el => { if(!el.value) el.value = dateString; });
+        document.querySelectorAll('.auto-time').forEach(el => { if(!el.value) el.value = timeString; });
     }
     function toggleNature() {
         const nature = document.getElementById('txn_nature')?.value;
@@ -134,6 +141,7 @@ BASE_STYLE = '''
     }
     function checkNewAccount(sel) {
         const newAcc = document.getElementById('new_account_name');
+        if(!newAcc) return;
         if(sel.value === 'new_dasti' || sel.value === 'new_person') {
             newAcc.style.display = 'block'; newAcc.required = true;
         } else { newAcc.style.display = 'none'; newAcc.required = false; }
@@ -200,6 +208,7 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print">
     
     {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
     <a href="/flag_entries" class="{% if active_page == 'flags' %}active{% endif %}" style="background: rgba(245, 158, 11, 0.2); color: #d97706;">🚩 Flags</a>
+    <a href="/bulk_edit_date" class="{% if active_page == 'bulk_date' %}active{% endif %}" style="background: rgba(139, 92, 246, 0.2); color: #6d28d9;">📅 Bulk Date</a>
     <a href="/logs" class="{% if active_page == 'logs' %}active{% endif %}" style="background: rgba(99, 102, 241, 0.2); color: #4338ca;">📝 Logs</a>
     {% endif %}
 
@@ -233,503 +242,16 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print">
     }
 </script>'''
 
-LOGS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Logs</title>''' + BASE_STYLE + '''</head><body>
-<div class="container">''' + NAVBAR_HTML + '''
-    <div class="card" style="padding: 0;">
-        <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📝 Edit Logs</h3>
-        <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Edited By</th><th>Changes Made</th><th>Voucher Details</th></tr>
-            {% for log in logs %}<tr>
-                <td style="padding-left: 20px;"><span style="font-weight: 500;">{{ log.date_formatted }}</span></td>
-                <td><span class="badge badge-mode">{{ log.edited_by }}</span></td>
-                <td style="color: var(--danger); font-weight: 500; font-size:0.9em;">{{ log.changes }}</td>
-                <td style="font-size: 0.85em; color: #4b5563;">{{ log.details }}</td>
-            </tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No edit logs found.</td></tr>{% endfor %}
-        </table>
-    </div>
-</div></body></html>'''
+LOGS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Logs</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📝 Edit Logs</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Edited By</th><th>Changes Made</th><th>Voucher Context</th></tr>{% for log in logs %}<tr><td style="padding-left: 20px;"><span style="font-weight: 500;">{{ log.date_formatted }}</span></td><td><span class="badge badge-mode">{{ log.edited_by }}</span></td><td style="color: var(--danger); font-weight: 500; font-size:0.9em;">{{ log.changes }}</td><td style="font-size: 0.85em; color: #4b5563;">{{ log.details }}</td></tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No edit logs found.</td></tr>{% endfor %}</table></div></div></body></html>'''
+FLAGS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Flag Entries</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card"><h3 style="margin-top: 0; color: var(--primary);">🚩 Search & Flag/Unflag Entries</h3><form action="/flag_entries" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;"><input type="hidden" name="action" value="search"><div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}" required></div><div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" value="{{ end_date }}" required></div><div class="form-group flex-1" style="min-width: 200px;"><label>Filter by Flag Status</label><select name="flag_filter" required><option value="unflagged" {% if flag_filter == 'unflagged' %}selected{% endif %}>Unflagged Entries Only</option><option value="flagged" {% if flag_filter == 'flagged' %}selected{% endif %}>Flagged Entries Only 🚩</option><option value="all" {% if flag_filter == 'all' %}selected{% endif %}>All Entries</option></select></div><button class="btn" style="background:indigo; height: 45px; padding: 10px 25px;" type="submit">🔍 Search Entries</button></form></div>{% if has_searched %}<div class="card" style="padding: 0;"><form action="/flag_entries" method="POST" onsubmit="return confirm('Process Flags for selected entries?');"><input type="hidden" name="action" value="process_flags"><div style="padding: 15px 20px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: center;"><button type="submit" name="flag_action" value="1" class="btn btn-sm" style="background:orange; color:white;">🚩 Mark Selected as Flagged</button><button type="submit" name="flag_action" value="0" class="btn btn-sm" style="background:slategray; color:white;">🏳️ Remove Flag from Selected</button></div><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th><th>Date & Time</th><th>Category / Detail</th><th style="text-align: right;">Amount</th></tr>{% for t in results %}<tr><td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td><td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td><td><span class="badge badge-mode">{{ t.category }}</span> {% if t.is_flagged == 1 %}<span style="color:orange;">🚩</span>{% endif %}<br><span style="white-space: pre-wrap;">{{ t.description }}</span></td><td style="text-align: right;">{% if t.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'advance'] %}<span style="color:red; font-weight:bold;">- ₹{{ "{:,.2f}".format(t.amount) }}</span>{% else %}<span style="color:green; font-weight:bold;">+ ₹{{ "{:,.2f}".format(t.amount) }}</span>{% endif %}</td></tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No entries found.</td></tr>{% endfor %}</table></form></div>{% endif %}</div></body></html>'''
 
-FLAGS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Flag Entries</title>''' + BASE_STYLE + '''</head><body>
-<div class="container">''' + NAVBAR_HTML + '''
-    <div class="card">
-        <h3 style="margin-top: 0; color: var(--primary);">🚩 Search & Flag/Unflag Entries</h3>
-        <form action="/flag_entries" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
-            <input type="hidden" name="action" value="search">
-            <div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}" required></div>
-            <div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" value="{{ end_date }}" required></div>
-            <div class="form-group flex-1" style="min-width: 200px;">
-                <label>Filter by Flag Status</label>
-                <select name="flag_filter" required>
-                    <option value="unflagged" {% if flag_filter == 'unflagged' %}selected{% endif %}>Unflagged Entries Only</option>
-                    <option value="flagged" {% if flag_filter == 'flagged' %}selected{% endif %}>Flagged Entries Only 🚩</option>
-                    <option value="all" {% if flag_filter == 'all' %}selected{% endif %}>All Entries</option>
-                </select>
-            </div>
-            <button class="btn" style="background:indigo; height: 45px; padding: 10px 25px;" type="submit">🔍 Search Entries</button>
-        </form>
-    </div>
+LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System Gateway</title><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet"><style>body { background-color: #111; color: #0f0; font-family: monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; flex-direction: column; transition: background 0.5s ease; touch-action: none; }.hud { display: flex; justify-content: space-between; align-items: center; width: 400px; max-width: 95vw; margin-bottom: 10px; font-size: 1.2em; font-weight: bold; }canvas { border: 2px solid #333; background-color: #000; box-shadow: 0 0 15px rgba(0, 255, 0, 0.2); max-width: 95vw; max-height: 50vh; }#login-container { display: none; position: absolute; z-index: 10; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); font-family: 'Poppins', sans-serif; color: #333; width: 350px; max-width: 90vw; }h2 { color: #4f46e5; margin-top: 0; text-align: center; }.form-group { margin-bottom: 15px; display: flex; flex-direction: column; }label { font-weight: 600; margin-bottom: 5px; font-size: 0.85em; color: #4b5563; }input { padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1em; }button { background: #4f46e5; color: white; border: none; padding: 10px; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 10px; width: 100%; font-size: 1em;}button:hover { background: #4338ca; }.controls { display: none; grid-template-columns: 60px 60px 60px; grid-template-rows: 60px 60px; gap: 10px; margin-top: 20px; justify-content: center; }.btn-ctrl { background: rgba(0, 255, 0, 0.2); border: 2px solid #0f0; color: #0f0; border-radius: 8px; font-size: 1.5em; display: flex; justify-content: center; align-items: center; user-select: none; }.btn-ctrl:active { background: rgba(0, 255, 0, 0.5); }.btn-up { grid-column: 2; grid-row: 1; }.btn-left { grid-column: 1; grid-row: 2; }.btn-down { grid-column: 2; grid-row: 2; }.btn-right { grid-column: 3; grid-row: 2; }@media (max-width: 768px) { .controls { display: grid; } }#game-over-msg { display: none; color: red; text-align: center; margin-top: 20px; font-size: 1.2em; font-family: 'Poppins', sans-serif; font-weight: bold; }{% if settings.game_enabled == 0 and not is_demo %}#game-wrapper { display: none !important; } #login-container { display: block !important; position: static; margin: auto; }body { background-color: #f8fafc; }{% endif %}</style></head><body><div id="game-wrapper"><div class="hud"><div id="timeDisplay">Time: 0s</div><div id="scoreDisplay">Score: 0 / {{ settings.blocks_to_eat }}</div></div><canvas id="gameCanvas" width="400" height="400"></canvas><div id="game-over-msg">Game Over.<br>Refresh page to restart.</div><div class="controls"><div class="btn-ctrl btn-up" id="btnUp">▲</div><div class="btn-ctrl btn-left" id="btnLeft">◀</div><div class="btn-ctrl btn-down" id="btnDown">▼</div><div class="btn-ctrl btn-right" id="btnRight">▶</div></div></div><div id="login-container"><h2>System Access</h2><form action="/login" method="POST"><div class="form-group"><label>Username</label><input type="text" name="username" required></div><div class="form-group"><label>Password</label><input type="password" name="password" required></div><button type="submit">Secure Login</button></form></div><script>{% if settings.game_enabled != 0 or is_demo %}const canvas = document.getElementById('gameCanvas');const ctx = canvas.getContext('2d');const grid = 20; let speedMod = parseInt("{{ settings.game_speed }}") || 0; let delayMs = 100 - (speedMod * 10); if (delayMs < 20) delayMs = 20; if (delayMs > 500) delayMs = 500; let gameTimer; let snake = { x: 160, y: 160, dx: grid, dy: 0, cells: [], maxCells: 4 }; let apple = { x: 320, y: 320 }; let score = 0; let targetScore = parseInt("{{ settings.blocks_to_eat }}") || 4; let startTime = Math.floor(Date.now() / 1000); let isGameOver = false; let loginUnlocked = false; let targetX = 0, targetY = 0; const targetCorner = "{{ settings.unlock_corner }}"; if(targetCorner === 'br') { targetX = canvas.width - grid; targetY = canvas.height - grid; } else if(targetCorner === 'bl') { targetX = 0; targetY = canvas.height - grid; } else if(targetCorner === 'tr') { targetX = canvas.width - grid; targetY = 0; } else if(targetCorner === 'tl') { targetX = 0; targetY = 0; } function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min)) + min; } function triggerGameOver() { isGameOver = true; clearTimeout(gameTimer); document.getElementById('game-over-msg').style.display = 'block'; } function loop() { if (isGameOver) return; gameTimer = setTimeout(loop, delayMs); ctx.clearRect(0, 0, canvas.width, canvas.height); document.getElementById('timeDisplay').innerText = 'Time: ' + (Math.floor(Date.now() / 1000) - startTime) + 's'; snake.x += snake.dx; snake.y += snake.dy; if (snake.x < 0) { snake.x = canvas.width - grid; } else if (snake.x >= canvas.width) { snake.x = 0; } if (snake.y < 0) { snake.y = canvas.height - grid; } else if (snake.y >= canvas.height) { snake.y = 0; } snake.cells.unshift({ x: snake.x, y: snake.y }); if (snake.cells.length > snake.maxCells) snake.cells.pop(); ctx.fillStyle = 'red'; ctx.fillRect(apple.x, apple.y, grid - 1, grid - 1); ctx.fillStyle = '#0f0'; snake.cells.forEach(function(cell, index) { ctx.fillRect(cell.x, cell.y, grid - 1, grid - 1); if (cell.x === apple.x && cell.y === apple.y) { snake.maxCells++; score++; document.getElementById('scoreDisplay').innerText = 'Score: ' + score + ' / ' + targetScore; if (score >= targetScore) { loginUnlocked = true; } apple.x = getRandomInt(0, 20) * grid; apple.y = getRandomInt(0, 20) * grid; } for (let i = index + 1; i < snake.cells.length; i++) { if (cell.x === snake.cells[i].x && cell.y === snake.cells[i].y) { triggerGameOver(); return; } } }); if (snake.x === targetX && snake.y === targetY) { if (loginUnlocked) { isGameOver = true; clearTimeout(gameTimer); document.getElementById('game-wrapper').style.display = 'none'; document.getElementById('login-container').style.display = 'block'; document.body.style.background = '#f8fafc'; } } } function setDir(dx, dy) { if(isGameOver) return; if (dx !== 0 && snake.dx === 0) { snake.dx = dx; snake.dy = dy; } else if (dy !== 0 && snake.dy === 0) { snake.dy = dy; snake.dx = dx; } } document.addEventListener('keydown', function(e) { if (e.which === 37) setDir(-grid, 0); else if (e.which === 38) setDir(0, -grid); else if (e.which === 39) setDir(grid, 0); else if (e.which === 40) setDir(0, grid); }); document.getElementById('btnUp').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, -grid); }, {passive: false}); document.getElementById('btnDown').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, grid); }, {passive: false}); document.getElementById('btnLeft').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(-grid, 0); }, {passive: false}); document.getElementById('btnRight').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(grid, 0); }, {passive: false}); document.getElementById('btnUp').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(0, -grid); }); document.getElementById('btnDown').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(0, grid); }); document.getElementById('btnLeft').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(-grid, 0); }); document.getElementById('btnRight').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(grid, 0); }); loop(); {% endif %}</script></body></html>'''
 
-    {% if has_searched %}
-    <div class="card" style="padding: 0;">
-        <form action="/flag_entries" method="POST" onsubmit="return confirm('Process Flags for selected entries?');">
-            <input type="hidden" name="action" value="process_flags">
-            <div style="padding: 15px 20px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: center;">
-                <button type="submit" name="flag_action" value="1" class="btn btn-sm" style="background:orange; color:white;">🚩 Mark Selected as Flagged</button>
-                <button type="submit" name="flag_action" value="0" class="btn btn-sm" style="background:slategray; color:white;">🏳️ Remove Flag from Selected</button>
-            </div>
-            <table style="width: 100%; border: none;">
-                <tr>
-                    <th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th>
-                    <th>Date & Time</th><th>Category / Detail</th><th style="text-align: right;">Amount</th>
-                </tr>
-                {% for t in results %}<tr>
-                    <td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
-                    <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                    <td><span class="badge badge-mode">{{ t.category }}</span> {% if t.is_flagged == 1 %}<span style="color:orange;">🚩</span>{% endif %}<br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
-                    <td style="text-align: right;">
-                        {% if t.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'advance'] %}<span style="color:red; font-weight:bold;">- ₹{{ "{:,.2f}".format(t.amount) }}</span>
-                        {% else %}<span style="color:green; font-weight:bold;">+ ₹{{ "{:,.2f}".format(t.amount) }}</span>{% endif %}
-                    </td>
-                </tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No entries found.</td></tr>{% endfor %}
-            </table>
-        </form>
-    </div>
-    {% endif %}
-</div></body></html>'''
+USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''{% if session.get('role') == 'superadmin' %}<div class="card" style="margin-bottom: 20px; padding: 20px; background: #e0f2fe; border: 1px solid #38bdf8;"><h3 style="font-size: 1.2em; color: #0369a1; margin-top: 0;">🎮 Global Configuration & App Settings</h3><form action="/update_settings" method="POST" style="display:flex; gap:15px; align-items: flex-end; flex-wrap:wrap;"><div class="form-group flex-1" style="min-width: 150px;"><label style="color:var(--danger);">🔴 App Lockdown (Kill Switch)</label><select name="app_disabled" required style="border-color:var(--danger); font-weight:bold;"><option value="0" {% if sys_settings.app_disabled == False %}selected{% endif %}>🟢 Active (Normal)</option><option value="1" {% if sys_settings.app_disabled == True %}selected{% endif %}>🔴 DISABLED (Lockdown)</option></select></div><div class="form-group flex-1" style="min-width: 150px;"><label>Game Gateway?</label><select name="game_enabled" required style="border-color:#7dd3fc;"><option value="1" {% if sys_settings.game_enabled == 1 %}selected{% endif %}>✅ Enabled</option><option value="0" {% if sys_settings.game_enabled == 0 %}selected{% endif %}>❌ Disabled</option></select></div><div class="form-group flex-1"><label>Blocks to Unlock</label><input type="number" name="blocks_to_eat" value="{{ sys_settings.blocks_to_eat }}" min="1" max="20" required></div><div class="form-group flex-1"><label>Game Speed</label><input type="number" name="game_speed" value="{{ sys_settings.game_speed }}" min="-20" max="10" required></div><div class="form-group flex-1" style="min-width: 200px;"><label>Require Delete Confirm</label><select name="require_delete_confirm" required><option value="1" {% if sys_settings.require_delete_confirm %}selected{% endif %}>Yes (Safe)</option><option value="0" {% if not sys_settings.require_delete_confirm %}selected{% endif %}>No</option></select></div><div class="form-group flex-1" style="min-width: 200px;"><label>Balance Display Mode</label><select name="balance_display_mode" required><option value="both" {% if sys_settings.balance_display_mode == 'both' %}selected{% endif %}>Show Both Ledgers</option><option value="person_only" {% if sys_settings.balance_display_mode == 'person_only' %}selected{% endif %}>Person Only</option><option value="dasti_only" {% if sys_settings.balance_display_mode == 'dasti_only' %}selected{% endif %}>Dasti Only</option><option value="none" {% if sys_settings.balance_display_mode == 'none' %}selected{% endif %}>Hide All</option></select></div><div class="form-group flex-1" style="min-width: 200px;"><label>Receipt Screen Mode</label><select name="receipt_display_mode" required><option value="strict" {% if sys_settings.receipt_display_mode == 'strict' %}selected{% endif %}>Pure Receipts Only</option><option value="all_positive" {% if sys_settings.receipt_display_mode == 'all_positive' %}selected{% endif %}>Show All Cash In (+)</option></select></div><div class="form-group flex-1" style="min-width: 200px;"><label>Edit Action Mode</label><select name="edit_action_mode" required><option value="button" {% if sys_settings.edit_action_mode == 'button' %}selected{% endif %}>Visible Button</option><option value="tap" {% if sys_settings.edit_action_mode == 'tap' %}selected{% endif %}>Direct Tap</option></select></div><div class="form-group flex-1" style="min-width: 200px;"><label>Report Flag Filter</label><select name="report_flag_mode" required><option value="both" {% if sys_settings.report_flag_mode == 'both' %}selected{% endif %}>Show All Entries</option><option value="flagged" {% if sys_settings.report_flag_mode == 'flagged' %}selected{% endif %}>Flagged Only</option><option value="unflagged" {% if sys_settings.report_flag_mode == 'unflagged' %}selected{% endif %}>Unflagged Only</option></select></div><div class="form-group flex-1" style="min-width: 200px;"><label>Report PDF Format</label><select name="report_pdf_format" required><option value="standard" {% if sys_settings.report_pdf_format == 'standard' %}selected{% endif %}>Standard Detail</option><option value="summary_breakdown" {% if sys_settings.report_pdf_format == 'summary_breakdown' %}selected{% endif %}>Summary Breakdown</option></select></div><button class="btn" type="submit" style="padding: 10px 25px; height: 45px; background:#0284c7; width: 100%;">💾 Save Global Settings</button></form></div>{% endif %}<div class="card" style="margin-bottom: 20px; padding: 20px;"><h3 style="font-size: 1.2em;">👤 Create New Firm User</h3><form action="/add_user" method="POST" style="display:flex; gap:15px; align-items: flex-end; flex-wrap:wrap;"><div class="form-group flex-1"><label>Username</label><input type="text" name="new_username" required></div><div class="form-group flex-1"><label>Password</label><input type="password" name="new_password" required></div><div class="form-group flex-1"><label>Role</label><select name="role" required><option value="admin">Admin</option><option value="superadmin">Superadmin</option><option value="cashier">Cashier</option><option value="market">Market</option></select></div><div class="form-group flex-1"><label>Idle Auto-Logout (Mins)</label><input type="number" name="idle_timeout" value="15" min="1" required></div><div class="form-group" style="padding-bottom: 10px; display: flex; flex-direction: column; gap: 5px;"><label><input type="checkbox" name="can_approve" value="1"> Grant Apprv</label><label><input type="checkbox" name="can_edit" value="1"> Grant Edit/Del</label><label><input type="checkbox" name="can_express_cashout" value="1"> Grant Exp Cash-Out</label></div><div class="form-group" style="padding-bottom: 10px; display: flex; flex-direction: column; gap: 5px;"><label><input type="checkbox" name="can_view_reports" value="1"> Grant Reports</label><label><input type="checkbox" name="can_view_trash" value="1"> Grant Trash</label></div><button class="btn-success" type="submit" style="padding: 10px 25px; height: 45px;">Create User</button></form></div><div class="card" style="padding: 0; margin-bottom: 20px;"><h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">🛡️ Registered Firm Users</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Username</th><th>Role</th><th>Rights</th><th style="text-align:center;">Action</th></tr>{% for u in users %}<tr><td style="padding-left: 20px; font-weight: 500;">{{ u.username }}</td><td><span class="badge badge-mode">{{ u.role|title }}</span></td><td style="font-size: 0.85em;">Apprv: {% if u.can_approve %}✅{% else %}❌{% endif %} | Edit: {% if u.can_edit %}✅{% else %}❌{% endif %} | Rep: {% if u.can_view_reports %}✅{% else %}❌{% endif %} | Trash: {% if u.can_view_trash %}✅{% else %}❌{% endif %} | ExpOut: {% if u.can_express_cashout %}✅{% else %}❌{% endif %}</td><td style="text-align: center;"><a href="/edit_user/{{ u.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️ Edit User</a></td></tr>{% endfor %}</table></div><div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">✔️ Manage Custom Approvers</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Approver Name</th><th style="text-align:center;">Action</th></tr>{% for a in approver_list %}<tr><td style="padding-left: 20px; font-weight: 500;"><span id="appr-span-{{a.id}}">{{ a.name }}</span><form id="appr-form-{{a.id}}" action="/edit_approver/{{ a.id }}" method="POST" style="display:none; gap:10px; align-items:center; margin:0;"><input type="text" name="name" value="{{ a.name }}" required style="max-width: 200px; padding: 5px;"><button type="submit" class="btn btn-sm btn-success">Save</button></form></td><td style="text-align: center;"><button class="btn btn-sm btn-warning" onclick="document.getElementById('appr-span-{{a.id}}').style.display='none'; document.getElementById('appr-form-{{a.id}}').style.display='flex'; this.style.display='none';">✏️ Edit</button> <a href="/delete_approver/{{ a.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Delete this custom approver name?');">🗑️</a></td></tr>{% else %}<tr><td colspan="2" style="text-align:center; padding:30px; color:#9ca3af;">No custom approvers added yet.</td></tr>{% endfor %}</table></div></div></body></html>'''
 
-LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System Gateway</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<style>
-    body { background-color: #111; color: #0f0; font-family: monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; flex-direction: column; transition: background 0.5s ease; touch-action: none; }
-    .hud { display: flex; justify-content: space-between; align-items: center; width: 400px; max-width: 95vw; margin-bottom: 10px; font-size: 1.2em; font-weight: bold; }
-    canvas { border: 2px solid #333; background-color: #000; box-shadow: 0 0 15px rgba(0, 255, 0, 0.2); max-width: 95vw; max-height: 50vh; }
-    #login-container { display: none; position: absolute; z-index: 10; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); font-family: 'Poppins', sans-serif; color: #333; width: 350px; max-width: 90vw; }
-    h2 { color: #4f46e5; margin-top: 0; text-align: center; }
-    .form-group { margin-bottom: 15px; display: flex; flex-direction: column; }
-    label { font-weight: 600; margin-bottom: 5px; font-size: 0.85em; color: #4b5563; }
-    input { padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1em; }
-    button { background: #4f46e5; color: white; border: none; padding: 10px; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 10px; width: 100%; font-size: 1em;}
-    button:hover { background: #4338ca; }
-    .controls { display: none; grid-template-columns: 60px 60px 60px; grid-template-rows: 60px 60px; gap: 10px; margin-top: 20px; justify-content: center; }
-    .btn-ctrl { background: rgba(0, 255, 0, 0.2); border: 2px solid #0f0; color: #0f0; border-radius: 8px; font-size: 1.5em; display: flex; justify-content: center; align-items: center; user-select: none; }
-    .btn-ctrl:active { background: rgba(0, 255, 0, 0.5); }
-    .btn-up { grid-column: 2; grid-row: 1; }
-    .btn-left { grid-column: 1; grid-row: 2; }
-    .btn-down { grid-column: 2; grid-row: 2; }
-    .btn-right { grid-column: 3; grid-row: 2; }
-    @media (max-width: 768px) { .controls { display: grid; } }
-    #game-over-msg { display: none; color: red; text-align: center; margin-top: 20px; font-size: 1.2em; font-family: 'Poppins', sans-serif; font-weight: bold; }
-    
-    {% if settings.game_enabled == 0 and not is_demo %}
-    #game-wrapper { display: none !important; } 
-    #login-container { display: block !important; position: static; margin: auto; }
-    body { background-color: #f8fafc; }
-    {% endif %}
-</style>
-</head><body>
-    <div id="game-wrapper">
-        <div class="hud">
-            <div id="timeDisplay">Time: 0s</div>
-            <div id="scoreDisplay">Score: 0 / {{ settings.blocks_to_eat }}</div>
-        </div>
-        <canvas id="gameCanvas" width="400" height="400"></canvas>
-        <div id="game-over-msg">Game Over.<br>Refresh page to restart.</div>
-        <div class="controls">
-            <div class="btn-ctrl btn-up" id="btnUp">▲</div>
-            <div class="btn-ctrl btn-left" id="btnLeft">◀</div>
-            <div class="btn-ctrl btn-down" id="btnDown">▼</div>
-            <div class="btn-ctrl btn-right" id="btnRight">▶</div>
-        </div>
-    </div>
+EDIT_USER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit User</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="max-width: 500px; margin: 0 auto;"><h2 style="color: var(--primary); margin-bottom: 20px;">⚙️ Edit User Profile</h2><form action="/edit_user/{{ edit_user.id }}" method="POST"><div class="form-group"><label>Username</label><input type="text" name="username" value="{{ edit_user.username }}" required></div><div class="form-group"><label>New Password <small>(Leave blank to keep current)</small></label><input type="password" name="password"></div><div class="form-group"><label>User Role</label><select name="role" required><option value="superadmin" {% if edit_user.role == 'superadmin' %}selected{% endif %}>Superadmin</option><option value="admin" {% if edit_user.role == 'admin' %}selected{% endif %}>Admin</option><option value="cashier" {% if edit_user.role == 'cashier' %}selected{% endif %}>Cashier</option><option value="market" {% if edit_user.role == 'market' %}selected{% endif %}>Market</option></select></div><div class="form-group"><label>Idle Auto-Logout (Minutes)</label><input type="number" name="idle_timeout" value="{{ edit_user.idle_timeout_minutes | default(15) }}" min="1" required></div><div class="form-group" style="padding-bottom: 15px; margin-top: 10px; display: flex; flex-direction: column; gap: 8px;"><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_approve" value="1" {% if edit_user.can_approve %}checked{% endif %} style="width: auto;"> Grant Voucher Approval Rights</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_edit" value="1" {% if edit_user.can_edit %}checked{% endif %} style="width: auto;"> Grant Edit / Delete Rights</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_express_cashout" value="1" {% if edit_user.can_express_cashout %}checked{% endif %} style="width: auto;"> Grant Express Cash-Out</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_view_reports" value="1" {% if edit_user.can_view_reports %}checked{% endif %} style="width: auto;"> Grant Report Access</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_view_trash" value="1" {% if edit_user.can_view_trash %}checked{% endif %} style="width: auto;"> Grant Trash Bin Access</label></div><div style="display: flex; gap: 15px;"><a href="/manage_users" class="btn btn-outline" style="flex:1;">Cancel</a><button class="btn-success" type="submit" style="flex:1;">Save Updates</button></div></form></div></div></body></html>'''
 
-    <div id="login-container">
-        <h2>System Access</h2>
-        <form action="/login" method="POST">
-            <div class="form-group"><label>Username</label><input type="text" name="username" required></div>
-            <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
-            <button type="submit">Secure Login</button>
-        </form>
-    </div>
-
-    <script>
-        {% if settings.game_enabled != 0 or is_demo %}
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const grid = 20;
-        
-        let speedMod = parseInt("{{ settings.game_speed }}") || 0;
-        let delayMs = 100 - (speedMod * 10);
-        if (delayMs < 20) delayMs = 20;
-        if (delayMs > 500) delayMs = 500;
-        let gameTimer;
-        
-        let snake = { x: 160, y: 160, dx: grid, dy: 0, cells: [], maxCells: 4 };
-        let apple = { x: 320, y: 320 };
-        
-        let score = 0;
-        let targetScore = parseInt("{{ settings.blocks_to_eat }}") || 4;
-        let startTime = Math.floor(Date.now() / 1000);
-        let isGameOver = false;
-        let loginUnlocked = false;
-        
-        let targetX = 0, targetY = 0;
-        const targetCorner = "{{ settings.unlock_corner }}";
-        if(targetCorner === 'br') { targetX = canvas.width - grid; targetY = canvas.height - grid; }
-        else if(targetCorner === 'bl') { targetX = 0; targetY = canvas.height - grid; }
-        else if(targetCorner === 'tr') { targetX = canvas.width - grid; targetY = 0; }
-        else if(targetCorner === 'tl') { targetX = 0; targetY = 0; }
-
-        function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min)) + min; }
-        function triggerGameOver() { isGameOver = true; clearTimeout(gameTimer); document.getElementById('game-over-msg').style.display = 'block'; }
-
-        function loop() {
-            if (isGameOver) return; 
-            gameTimer = setTimeout(loop, delayMs);
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            document.getElementById('timeDisplay').innerText = 'Time: ' + (Math.floor(Date.now() / 1000) - startTime) + 's';
-
-            snake.x += snake.dx;
-            snake.y += snake.dy;
-            if (snake.x < 0) { snake.x = canvas.width - grid; } 
-            else if (snake.x >= canvas.width) { snake.x = 0; }
-            if (snake.y < 0) { snake.y = canvas.height - grid; } 
-            else if (snake.y >= canvas.height) { snake.y = 0; }
-
-            snake.cells.unshift({ x: snake.x, y: snake.y });
-            if (snake.cells.length > snake.maxCells) snake.cells.pop();
-
-            ctx.fillStyle = 'red';
-            ctx.fillRect(apple.x, apple.y, grid - 1, grid - 1);
-            ctx.fillStyle = '#0f0';
-            
-            snake.cells.forEach(function(cell, index) {
-                ctx.fillRect(cell.x, cell.y, grid - 1, grid - 1);
-                if (cell.x === apple.x && cell.y === apple.y) {
-                    snake.maxCells++;
-                    score++;
-                    document.getElementById('scoreDisplay').innerText = 'Score: ' + score + ' / ' + targetScore;
-                    if (score >= targetScore) { loginUnlocked = true; }
-                    apple.x = getRandomInt(0, 20) * grid;
-                    apple.y = getRandomInt(0, 20) * grid;
-                }
-                for (let i = index + 1; i < snake.cells.length; i++) {
-                    if (cell.x === snake.cells[i].x && cell.y === snake.cells[i].y) {
-                        triggerGameOver(); return;
-                    }
-                }
-            });
-
-            if (snake.x === targetX && snake.y === targetY) {
-                if (loginUnlocked) {
-                    isGameOver = true;
-                    clearTimeout(gameTimer);
-                    document.getElementById('game-wrapper').style.display = 'none';
-                    document.getElementById('login-container').style.display = 'block';
-                    document.body.style.background = '#f8fafc';
-                }
-            }
-        }
-
-        function setDir(dx, dy) {
-            if(isGameOver) return;
-            if (dx !== 0 && snake.dx === 0) { snake.dx = dx; snake.dy = dy; }
-            else if (dy !== 0 && snake.dy === 0) { snake.dy = dy; snake.dx = dx; }
-        }
-
-        document.addEventListener('keydown', function(e) {
-            if (e.which === 37) setDir(-grid, 0);
-            else if (e.which === 38) setDir(0, -grid);
-            else if (e.which === 39) setDir(grid, 0);
-            else if (e.which === 40) setDir(0, grid);
-        });
-        
-        document.getElementById('btnUp').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, -grid); }, {passive: false});
-        document.getElementById('btnDown').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, grid); }, {passive: false});
-        document.getElementById('btnLeft').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(-grid, 0); }, {passive: false});
-        document.getElementById('btnRight').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(grid, 0); }, {passive: false});
-        
-        document.getElementById('btnUp').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(0, -grid); });
-        document.getElementById('btnDown').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(0, grid); });
-        document.getElementById('btnLeft').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(-grid, 0); });
-        document.getElementById('btnRight').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(grid, 0); });
-
-        loop();
-        {% endif %}
-    </script>
-</body></html>'''
-
-USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        
-        {% if session.get('role') == 'superadmin' %}
-        <div class="card" style="margin-bottom: 20px; padding: 20px; background: #e0f2fe; border: 1px solid #38bdf8;">
-            <h3 style="font-size: 1.2em; color: #0369a1; margin-top: 0;">🎮 Global Configuration & App Settings</h3>
-            <form action="/update_settings" method="POST" style="display:flex; gap:15px; align-items: flex-end; flex-wrap:wrap;">
-                
-                <div class="form-group flex-1" style="min-width: 150px;">
-                    <label style="color:var(--danger);">🔴 App Lockdown (Kill Switch)</label>
-                    <select name="app_disabled" required style="border-color:var(--danger); font-weight:bold;">
-                        <option value="0" {% if sys_settings.app_disabled == False %}selected{% endif %}>🟢 Active (Normal)</option>
-                        <option value="1" {% if sys_settings.app_disabled == True %}selected{% endif %}>🔴 DISABLED (Lockdown)</option>
-                    </select>
-                </div>
-                
-                <div class="form-group flex-1" style="min-width: 150px;">
-                    <label>Game Gateway?</label>
-                    <select name="game_enabled" required style="border-color:#7dd3fc;">
-                        <option value="1" {% if sys_settings.game_enabled == 1 %}selected{% endif %}>✅ Enabled</option>
-                        <option value="0" {% if sys_settings.game_enabled == 0 %}selected{% endif %}>❌ Disabled</option>
-                    </select>
-                </div>
-                
-                <div class="form-group flex-1"><label>Blocks to Unlock</label><input type="number" name="blocks_to_eat" value="{{ sys_settings.blocks_to_eat }}" min="1" max="20" required></div>
-                <div class="form-group flex-1"><label>Game Speed</label><input type="number" name="game_speed" value="{{ sys_settings.game_speed }}" min="-20" max="10" required></div>
-                
-                <div class="form-group flex-1" style="min-width: 200px;">
-                    <label>Require Delete Confirm</label>
-                    <select name="require_delete_confirm" required>
-                        <option value="1" {% if sys_settings.require_delete_confirm %}selected{% endif %}>Yes (Safe)</option>
-                        <option value="0" {% if not sys_settings.require_delete_confirm %}selected{% endif %}>No</option>
-                    </select>
-                </div>
-                
-                <div class="form-group flex-1" style="min-width: 200px;">
-                    <label>Balance Display Mode</label>
-                    <select name="balance_display_mode" required>
-                        <option value="both" {% if sys_settings.balance_display_mode == 'both' %}selected{% endif %}>Show Both Ledgers</option>
-                        <option value="person_only" {% if sys_settings.balance_display_mode == 'person_only' %}selected{% endif %}>Person Only</option>
-                        <option value="dasti_only" {% if sys_settings.balance_display_mode == 'dasti_only' %}selected{% endif %}>Dasti Only</option>
-                        <option value="none" {% if sys_settings.balance_display_mode == 'none' %}selected{% endif %}>Hide All</option>
-                    </select>
-                </div>
-
-                <div class="form-group flex-1" style="min-width: 200px;">
-                    <label>Receipt Screen Mode</label>
-                    <select name="receipt_display_mode" required>
-                        <option value="strict" {% if sys_settings.receipt_display_mode == 'strict' %}selected{% endif %}>Pure Receipts Only</option>
-                        <option value="all_positive" {% if sys_settings.receipt_display_mode == 'all_positive' %}selected{% endif %}>Show All Cash In (+)</option>
-                    </select>
-                </div>
-
-                <div class="form-group flex-1" style="min-width: 200px;">
-                    <label>Edit Action Mode</label>
-                    <select name="edit_action_mode" required>
-                        <option value="button" {% if sys_settings.edit_action_mode == 'button' %}selected{% endif %}>Visible Button</option>
-                        <option value="tap" {% if sys_settings.edit_action_mode == 'tap' %}selected{% endif %}>Direct Tap</option>
-                    </select>
-                </div>
-
-                <div class="form-group flex-1" style="min-width: 200px;">
-                    <label>Report Flag Filter</label>
-                    <select name="report_flag_mode" required>
-                        <option value="both" {% if sys_settings.report_flag_mode == 'both' %}selected{% endif %}>Show All Entries</option>
-                        <option value="flagged" {% if sys_settings.report_flag_mode == 'flagged' %}selected{% endif %}>Flagged Only</option>
-                        <option value="unflagged" {% if sys_settings.report_flag_mode == 'unflagged' %}selected{% endif %}>Unflagged Only</option>
-                    </select>
-                </div>
-
-                <div class="form-group flex-1" style="min-width: 200px;">
-                    <label>Report PDF Format</label>
-                    <select name="report_pdf_format" required>
-                        <option value="standard" {% if sys_settings.report_pdf_format == 'standard' %}selected{% endif %}>Standard Detail</option>
-                        <option value="summary_breakdown" {% if sys_settings.report_pdf_format == 'summary_breakdown' %}selected{% endif %}>Summary Breakdown</option>
-                    </select>
-                </div>
-                
-                <button class="btn" type="submit" style="padding: 10px 25px; height: 45px; background:#0284c7; width: 100%;">💾 Save Global Settings</button>
-            </form>
-        </div>
-        {% endif %}
-
-        <div class="card" style="margin-bottom: 20px; padding: 20px;">
-            <h3 style="font-size: 1.2em;">👤 Create New Firm User</h3>
-            <form action="/add_user" method="POST" style="display:flex; gap:15px; align-items: flex-end; flex-wrap:wrap;">
-                <div class="form-group flex-1"><label>Username</label><input type="text" name="new_username" required></div>
-                <div class="form-group flex-1"><label>Password</label><input type="password" name="new_password" required></div>
-                <div class="form-group flex-1"><label>Role</label>
-                    <select name="role" required><option value="admin">Admin</option><option value="superadmin">Superadmin</option><option value="cashier">Cashier</option><option value="market">Market</option></select></div>
-                <div class="form-group flex-1"><label>Idle Auto-Logout (Mins)</label><input type="number" name="idle_timeout" value="15" min="1" required></div>
-                
-                <div class="form-group" style="padding-bottom: 10px; display: flex; flex-direction: column; gap: 5px;">
-                    <label><input type="checkbox" name="can_approve" value="1"> Grant Apprv</label>
-                    <label><input type="checkbox" name="can_edit" value="1"> Grant Edit/Del</label>
-                    <label><input type="checkbox" name="can_express_cashout" value="1"> Grant Exp Cash-Out</label>
-                </div>
-                <div class="form-group" style="padding-bottom: 10px; display: flex; flex-direction: column; gap: 5px;">
-                    <label><input type="checkbox" name="can_view_reports" value="1"> Grant Reports</label>
-                    <label><input type="checkbox" name="can_view_trash" value="1"> Grant Trash</label>
-                </div>
-
-                <button class="btn-success" type="submit" style="padding: 10px 25px; height: 45px;">Create User</button>
-            </form>
-        </div>
-        
-        <div class="card" style="padding: 0; margin-bottom: 20px;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">🛡️ Registered Firm Users</h3>
-            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Username</th><th>Role</th><th>Rights</th><th style="text-align:center;">Action</th></tr>
-                {% for u in users %}<tr>
-                    <td style="padding-left: 20px; font-weight: 500;">{{ u.username }}</td>
-                    <td><span class="badge badge-mode">{{ u.role|title }}</span></td>
-                    <td style="font-size: 0.85em;">
-                        Apprv: {% if u.can_approve %}✅{% else %}❌{% endif %} | 
-                        Edit: {% if u.can_edit %}✅{% else %}❌{% endif %} | 
-                        Rep: {% if u.can_view_reports %}✅{% else %}❌{% endif %} | 
-                        Trash: {% if u.can_view_trash %}✅{% else %}❌{% endif %} | 
-                        ExpOut: {% if u.can_express_cashout %}✅{% else %}❌{% endif %}
-                    </td>
-                    <td style="text-align: center;"><a href="/edit_user/{{ u.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️ Edit User</a></td>
-                </tr>{% endfor %}
-            </table>
-        </div>
-        
-        <div class="card" style="padding: 0;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">✔️ Manage Custom Approvers</h3>
-            <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Approver Name</th><th style="text-align:center;">Action</th></tr>
-                {% for a in approver_list %}<tr>
-                    <td style="padding-left: 20px; font-weight: 500;">
-                        <form action="/edit_approver/{{ a.id }}" method="POST" style="display:flex; gap:10px; align-items:center; margin:0;">
-                            <input type="text" name="name" value="{{ a.name }}" required style="max-width: 300px; padding: 5px;">
-                            <button type="submit" class="btn btn-sm" style="background:#0284c7; color:white;">Save Name</button>
-                        </form>
-                    </td>
-                    <td style="text-align: center;"><a href="/delete_approver/{{ a.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Delete this custom approver name?');">🗑️ Delete</a></td>
-                </tr>{% else %}<tr><td colspan="2" style="text-align:center; padding:30px; color:#9ca3af;">No custom approvers added yet.</td></tr>{% endfor %}
-            </table>
-        </div>
-        
-    </div></body></html>'''
-
-EDIT_USER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit User</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card" style="max-width: 500px; margin: 0 auto;">
-            <h2 style="color: var(--primary); margin-bottom: 20px;">⚙️ Edit User Profile</h2>
-            <form action="/edit_user/{{ edit_user.id }}" method="POST">
-                <div class="form-group"><label>Username</label><input type="text" name="username" value="{{ edit_user.username }}" required></div>
-                <div class="form-group"><label>New Password <small>(Leave blank to keep current)</small></label><input type="password" name="password"></div>
-                <div class="form-group"><label>User Role</label>
-                    <select name="role" required>
-                        <option value="superadmin" {% if edit_user.role == 'superadmin' %}selected{% endif %}>Superadmin</option>
-                        <option value="admin" {% if edit_user.role == 'admin' %}selected{% endif %}>Admin</option>
-                        <option value="cashier" {% if edit_user.role == 'cashier' %}selected{% endif %}>Cashier</option>
-                        <option value="market" {% if edit_user.role == 'market' %}selected{% endif %}>Market</option>
-                    </select>
-                </div>
-                <div class="form-group"><label>Idle Auto-Logout (Minutes)</label>
-                    <input type="number" name="idle_timeout" value="{{ edit_user.idle_timeout_minutes | default(15) }}" min="1" required></div>
-                
-                <div class="form-group" style="padding-bottom: 15px; margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_approve" value="1" {% if edit_user.can_approve %}checked{% endif %} style="width: auto;"> Grant Voucher Approval Rights</label>
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_edit" value="1" {% if edit_user.can_edit %}checked{% endif %} style="width: auto;"> Grant Edit / Delete Rights</label>
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_express_cashout" value="1" {% if edit_user.can_express_cashout %}checked{% endif %} style="width: auto;"> Grant Express Cash-Out</label>
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_view_reports" value="1" {% if edit_user.can_view_reports %}checked{% endif %} style="width: auto;"> Grant Report Access</label>
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_view_trash" value="1" {% if edit_user.can_view_trash %}checked{% endif %} style="width: auto;"> Grant Trash Bin Access</label>
-                </div>
-                
-                <div style="display: flex; gap: 15px;">
-                    <a href="/manage_users" class="btn btn-outline" style="flex:1;">Cancel</a>
-                    <button class="btn-success" type="submit" style="flex:1;">Save Updates</button>
-                </div>
-            </form>
-        </div>
-    </div></body></html>'''
-
-APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Approvals Dashboard</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        
-        <div style="display:flex; gap: 10px; margin-bottom: 20px;">
-            <button class="btn btn-warning" id="tab-pending-btn" onclick="toggleTab('pending')" style="flex:1;">⏳ Pending Vouchers</button>
-            <button class="btn btn-outline" id="tab-approved-btn" onclick="toggleTab('approved')" style="flex:1; background:#fff;">✅ Approved History</button>
-        </div>
-
-        <div id="section-pending">
-            <div class="card" style="margin-bottom: 20px;">
-                <h3 style="margin-top: 0; font-size: 1.2em; color: var(--primary);">📅 Bulk Approve by Date Range</h3>
-                <form action="/bulk_approve" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
-                    <div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" required></div>
-                    <div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" required></div>
-                    <div class="form-group flex-1" style="min-width: 200px;">
-                        <label>Approved By</label>
-                        <select name="approved_by_select" style="border-color: var(--warning); font-weight:bold;">
-                            <option value="">-- Set as Myself ({{ username }}) --</option>
-                            <optgroup label="✅ Allowed Approvers">
-                                {% for u in approver_names %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
-                            </optgroup>
-                        </select>
-                    </div>
-                    <button class="btn-success" type="submit" style="height: 45px; padding: 10px 25px; font-size: 1.05em;" onclick="return confirm('Approve ALL pending entries in this date range?');">Bulk Approve Range</button>
-                </form>
-            </div>
-
-            <div class="card" style="padding: 0;">
-                <h3 style="padding: 15px 20px; margin: 0; background: #fef08a; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #92400e;">☑️ Select & Approve Specific Vouchers</h3>
-                <form action="/bulk_approve_selected" method="POST" onsubmit="return confirm('Approve selected vouchers?');">
-                    <div style="padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 15px; align-items: flex-end; background: #fffbeb;">
-                        <div class="form-group" style="margin-bottom: 0; min-width: 200px;">
-                            <label style="color:#92400e;">Set Approved By:</label>
-                            <select name="approved_by_select" style="border-color: var(--warning); font-weight:bold;">
-                                <option value="">-- Set as Myself ({{ username }}) --</option>
-                                <optgroup label="✅ Allowed Approvers">
-                                    {% for u in approver_names %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
-                                </optgroup>
-                            </select>
-                        </div>
-                        <button type="submit" class="btn btn-success" style="height: 40px; padding: 0 25px;">✅ Approve Selected Entries</button>
-                    </div>
-                    
-                    <table style="width: 100%; border: none;">
-                        <tr>
-                            <th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:18px; height:18px; cursor:pointer;"></th>
-                            <th>Date & Time</th><th>Description / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th>
-                        </tr>
-                        {% for t in pending %}<tr>
-                            <td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:18px; height:18px; cursor:pointer;"></td>
-                            <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                            <td><span class="badge badge-pending">Pending</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
-                            <td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td>
-                            <td style="text-align: center;">
-                                <a href="/approve_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Approve this transaction?');">✅</a> 
-                                <a href="/reject_voucher/{{ t.link_id }}" class="btn btn-sm btn-danger" onclick="return confirm('Reject & Delete this transaction?');">❌</a>
-                            </td>
-                        </tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No pending vouchers requiring approval.</td></tr>{% endfor %}
-                    </table>
-                </form>
-            </div>
-        </div>
-
-        <div id="section-approved" style="display: none;">
-            <div class="card" style="padding: 0;">
-                <h3 style="padding: 15px 20px; margin: 0; background: #d1fae5; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #065f46;">✅ Recently Approved Vouchers</h3>
-                <table style="width: 100%; border: none;">
-                    <tr><th style="padding-left: 20px;">Date & Time</th><th>Description / Detail</th><th style="text-align: right; padding-right:20px;">Amount</th></tr>
-                    {% for t in approved %}<tr>
-                        <td style="padding-left: 20px;"><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                        <td><span class="badge badge-in" style="background:#e0f2fe; color:#0369a1;">Approved by: {{ t.approved_by }}</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
-                        <td style="text-align: right; padding-right:20px;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td>
-                    </tr>{% else %}<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding: 40px;">No recently approved vouchers found.</td></tr>{% endfor %}
-                </table>
-            </div>
-        </div>
-        
-    </div>
-    <script>
-        document.addEventListener("DOMContentLoaded", function() { setAutoDateTime(); });
-        function toggleTab(tab) {
-            if(tab === 'pending') {
-                document.getElementById('section-pending').style.display = 'block';
-                document.getElementById('section-approved').style.display = 'none';
-                document.getElementById('tab-pending-btn').className = 'btn btn-warning';
-                document.getElementById('tab-approved-btn').className = 'btn btn-outline';
-                document.getElementById('tab-approved-btn').style.background = '#fff';
-            } else {
-                document.getElementById('section-pending').style.display = 'none';
-                document.getElementById('section-approved').style.display = 'block';
-                document.getElementById('tab-pending-btn').className = 'btn btn-outline';
-                document.getElementById('tab-pending-btn').style.background = '#fff';
-                document.getElementById('tab-approved-btn').className = 'btn btn-success';
-            }
-        }
-    </script>
-    </body></html>'''
+APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Approvals Dashboard</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div style="display:flex; gap: 10px; margin-bottom: 20px;"><button class="btn btn-warning" id="tab-pending-btn" onclick="toggleTab('pending')" style="flex:1;">⏳ Pending Vouchers</button><button class="btn btn-outline" id="tab-approved-btn" onclick="toggleTab('approved')" style="flex:1; background:#fff;">✅ Approved History</button></div><div id="section-pending"><div class="card" style="margin-bottom: 20px;"><h3 style="margin-top: 0; font-size: 1.2em; color: var(--primary);">📅 Bulk Approve by Date Range</h3><form action="/bulk_approve" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;"><div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" required></div><div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" required></div><div class="form-group flex-1" style="min-width: 200px;"><label>Approved By</label><select name="approved_by_select" style="border-color: var(--warning); font-weight:bold;"><option value="">-- Set as Myself ({{ username }}) --</option><optgroup label="✅ Allowed Approvers">{% for u in approvers %}{% if u.can_approve %}<option value="{{ u.username }}">{{ u.username }}</option>{% endif %}{% endfor %}</optgroup></select></div><button class="btn-success" type="submit" style="height: 45px; padding: 10px 25px; font-size: 1.05em;" onclick="return confirm('Approve ALL pending entries in this date range?');">Bulk Approve Range</button></form></div><div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #fef08a; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #92400e;">☑️ Select & Approve Specific Vouchers</h3><form action="/bulk_approve_selected" method="POST" onsubmit="return confirm('Approve selected vouchers?');"><div style="padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 15px; align-items: flex-end; background: #fffbeb;"><div class="form-group" style="margin-bottom: 0; min-width: 200px;"><label style="color:#92400e;">Set Approved By:</label><select name="approved_by_select" style="border-color: var(--warning); font-weight:bold;"><option value="">-- Set as Myself ({{ username }}) --</option><optgroup label="✅ Allowed Approvers">{% for u in approvers %}{% if u.can_approve %}<option value="{{ u.username }}">{{ u.username }}</option>{% endif %}{% endfor %}</optgroup></select></div><button type="submit" class="btn btn-success" style="height: 40px; padding: 0 25px;">✅ Approve Selected Entries</button></div><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:18px; height:18px; cursor:pointer;"></th><th>Date & Time</th><th>Description / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>{% for t in pending %}<tr><td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:18px; height:18px; cursor:pointer;"></td><td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td><td><span class="badge badge-pending">Pending</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td><td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td><td style="text-align: center;"><a href="/approve_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Approve this transaction?');">✅</a> <a href="/reject_voucher/{{ t.link_id }}" class="btn btn-sm btn-danger" onclick="return confirm('Reject & Delete this transaction?');">❌</a></td></tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No pending vouchers requiring approval.</td></tr>{% endfor %}</table></form></div></div><div id="section-approved" style="display: none;"><div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #d1fae5; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #065f46;">✅ Recently Approved Vouchers</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Description / Detail</th><th style="text-align: right; padding-right:20px;">Amount</th></tr>{% for t in approved %}<tr><td style="padding-left: 20px;"><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td><td><span class="badge badge-in" style="background:#e0f2fe; color:#0369a1;">Approved by: {{ t.approved_by }}</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td><td style="text-align: right; padding-right:20px;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td></tr>{% else %}<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding: 40px;">No recently approved vouchers found.</td></tr>{% endfor %}</table></div></div></div><script>document.addEventListener("DOMContentLoaded", function() { setAutoDateTime(); });function toggleTab(tab) {if(tab === 'pending') {document.getElementById('section-pending').style.display = 'block';document.getElementById('section-approved').style.display = 'none';document.getElementById('tab-pending-btn').className = 'btn btn-warning';document.getElementById('tab-approved-btn').className = 'btn btn-outline';document.getElementById('tab-approved-btn').style.background = '#fff';} else {document.getElementById('section-pending').style.display = 'none';document.getElementById('section-approved').style.display = 'block';document.getElementById('tab-pending-btn').className = 'btn btn-outline';document.getElementById('tab-pending-btn').style.background = '#fff';document.getElementById('tab-approved-btn').className = 'btn btn-success';}}</script></body></html>'''
 
 ENTRY_FORM_HTML = '''
 <form action="/add_batch_unified" method="POST" class="no-print">
@@ -744,25 +266,25 @@ ENTRY_FORM_HTML = '''
             <div class="form-group flex-1" style="min-width: 200px; margin-bottom: 0;">
                 <label>Nature of Batch Voucher</label>
                 <select name="txn_nature" id="txn_nature" onchange="toggleNature()" required style="border-color: var(--primary); font-weight: bold; font-size: 1.05em;">
-                    <option value="slip_in" style="color:var(--danger);">➖ Submit Slip / Bill (- Deduct)</option>
-                    <option value="advance" style="color:var(--primary);">📤 Give Advance (+ Positive Bal)</option>
-                    <option value="receive_cash" style="color:var(--success);">📥 Receive Cash Settle (- Deduct)</option>
+                    <option value="slip_in" style="color:var(--danger);">➖ Submit Slip / Bill (- Deduct from User Bal)</option>
+                    <option value="advance" style="color:var(--primary);">📤 Give Advance Payment (+ Positive User Bal)</option>
+                    <option value="receive_cash" style="color:var(--success);">📥 Receive Cash Settlement (- Deduct from User Bal)</option>
                 </select>
             </div>
             <div class="form-group flex-1" style="min-width: 250px; margin-bottom: 0; flex: 2;">
-                <label id="primary_label" style="color: var(--primary);">Assigned Account</label>
+                <label id="primary_label" style="color: var(--primary);">Ledger Account</label>
                 <select name="primary_account" id="primary_account" onchange="checkNewAccount(this)" required style="border-color: var(--primary); font-weight: bold; background: white; font-size: 1.05em;">
                     <option value="main" style="font-weight:bold;">🏢 Main Cash Book (Default)</option>
                     <optgroup label="👥 Person Ledgers">
-                        {% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}</option>{% endfor %}
+                        {% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}'s Account</option>{% endfor %}
                     </optgroup>
                     <optgroup label="💸 Dasti Accounts">
-                        {% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}</option>{% endfor %}
+                        {% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}'s Dasti</option>{% endfor %}
                     </optgroup>
-                    <option value="new_dasti" style="color: #0ea5e9; font-weight: bold;">➕ Create New Dasti...</option>
-                    <option value="new_person" style="color: var(--success); font-weight: bold;">➕ Create New Person...</option>
+                    <option value="new_dasti" style="color: #0ea5e9; font-weight: bold;">➕ Create New Dasti Account...</option>
+                    <option value="new_person" style="color: var(--success); font-weight: bold;">➕ Create New Person Account...</option>
                 </select>
-                <input type="text" name="new_account_name" id="new_account_name" placeholder="Enter New Party Name..." style="display:none; margin-top: 8px; border-color: var(--primary); width: 100%;">
+                <input type="text" name="new_account_name" id="new_account_name" placeholder="Type New Name Here..." style="display:none; margin-top: 8px; border-color: var(--primary); width: 100%;">
             </div>
         </div>
         
@@ -786,13 +308,13 @@ ENTRY_FORM_HTML = '''
     </div>
     <div style="border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; background: #fff; overflow-x: auto;">
         <table style="width: 100%; min-width: 800px; margin: 0; background: transparent;">
-            <thead style="background: #f1f5f9;"><tr><th style="width: 25%;">Category</th><th style="width: 50%;">Description / Remarks</th><th style="width: 20%;">Amount (₹)</th><th style="width: 5%; text-align: center;">Act</th></tr></thead>
+            <thead style="background: #f1f5f9;"><tr><th style="width: 25%;">Category</th><th style="width: 50%;">Bill Detail / Description</th><th style="width: 20%;">Amount (₹)</th><th style="width: 5%; text-align: center;">Act</th></tr></thead>
             <tbody id="entryBody"></tbody>
         </table>
     </div>
     <div style="display: flex; gap: 15px; justify-content: space-between;">
-        <button type="button" class="btn-outline" onclick="addRow('{% for c in categories %}<option value=\\\'{{c}}\\\'>{{c}}</option>{% endfor %}')" style="min-width: 200px; font-size: 1em;">+ Add New Row</button>
-        <button class="btn-success" type="submit" style="min-width: 250px; font-size: 1.1em; padding: 12px;" onclick="return confirmSubmission(event)">💾 Save Bulk Batch</button>
+        <button type="button" class="btn-outline" onclick="addRow('{% for c in categories %}<option value=\\\'{{c}}\\\'>{{c}}</option>{% endfor %}')" style="min-width: 200px; font-size: 1em;">+ Add Another Row</button>
+        <button class="btn-success" type="submit" style="min-width: 250px; font-size: 1.1em; padding: 12px;" onclick="return confirmSubmission(event)">💾 Save Batch Voucher</button>
     </div>
 </form>
 <script>
@@ -878,12 +400,9 @@ EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BAS
                     <input type="text" name="approved_by_custom" value="{% if entry.approved_by and entry.approved_by not in approver_names %}{{ entry.approved_by }}{% endif %}" placeholder="Type Approver Name..." style="display:{% if entry.approved_by and entry.approved_by not in approver_names %}block{% else %}none{% endif %}; margin-top: 8px; border-color: var(--primary);">
                 </div>
                 {% endif %}
-                
+
                 <div class="form-group" style="margin-top: 15px;">
-                    <label style="display:flex; align-items:center; gap:8px; color: #d97706; cursor:pointer;">
-                        <input type="checkbox" name="is_flagged" value="1" {% if entry.is_flagged == 1 %}checked{% endif %} style="width: auto;">
-                        🚩 Mark this entry as Flagged
-                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; color: #d97706; cursor:pointer;"><input type="checkbox" name="is_flagged" value="1" {% if entry.is_flagged == 1 %}checked{% endif %} style="width: auto;"> 🚩 Mark this entry as Flagged</label>
                 </div>
 
                 <div style="display: flex; gap: 15px; margin-top: 20px;">
@@ -898,12 +417,28 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
     <div class="container">''' + NAVBAR_HTML + '''
         
         <div class="card no-print" style="padding: 20px; background: linear-gradient(to right, #ffffff, #f1f5f9);">
-            <h3 style="margin-bottom: 15px; font-size: 1.2em; color: #475569;">📈 Account Flow Summary</h3>
-            <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 0;">
-                <div class="stat-card" style="padding: 15px;"><h4>Today</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_d_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_d_out) }}</div></div>
-                <div class="stat-card" style="padding: 15px;"><h4>Last 7 Days</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_w_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_w_out) }}</div></div>
-                <div class="stat-card" style="padding: 15px;"><h4>This Month</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_m_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_m_out) }}</div></div>
-                <div class="stat-card" style="padding: 15px;"><h4>This Year</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_y_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_y_out) }}</div></div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="margin: 0; font-size: 1.2em; color: #475569;">📈 Account Flow Summary</h3>
+                {% if active_filter != 'all' %}
+                <a href="/" class="badge badge-pending" style="text-decoration:none;">❌ Clear Filter (Currently: {{ active_filter|title }})</a>
+                {% endif %}
+            </div>
+            <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 0;">
+                <div class="stat-card clickable" onclick="window.location.href='/?filter=today'" style="padding: 15px; cursor: pointer; {% if active_filter == 'today' %}border-color:var(--primary); background:#e0e7ff;{% endif %}">
+                    <h4>Today</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_d_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_d_out) }}</div>
+                </div>
+                <div class="stat-card clickable" onclick="window.location.href='/?filter=yesterday'" style="padding: 15px; cursor: pointer; {% if active_filter == 'yesterday' %}border-color:var(--primary); background:#e0e7ff;{% endif %}">
+                    <h4>Yesterday</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_yest_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_yest_out) }}</div>
+                </div>
+                <div class="stat-card clickable" onclick="window.location.href='/?filter=week'" style="padding: 15px; cursor: pointer; {% if active_filter == 'week' %}border-color:var(--primary); background:#e0e7ff;{% endif %}">
+                    <h4>Last 7 Days</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_w_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_w_out) }}</div>
+                </div>
+                <div class="stat-card clickable" onclick="window.location.href='/?filter=month'" style="padding: 15px; cursor: pointer; {% if active_filter == 'month' %}border-color:var(--primary); background:#e0e7ff;{% endif %}">
+                    <h4>This Month</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_m_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_m_out) }}</div>
+                </div>
+                <div class="stat-card clickable" onclick="window.location.href='/?filter=year'" style="padding: 15px; cursor: pointer; {% if active_filter == 'year' %}border-color:var(--primary); background:#e0e7ff;{% endif %}">
+                    <h4>This Year</h4><div style="color:var(--success); font-weight:bold;">+ ₹{{ "{:,.2f}".format(s_y_in) }}</div><div style="color:var(--danger); font-weight:bold;">- ₹{{ "{:,.2f}".format(s_y_out) }}</div>
+                </div>
             </div>
         </div>
 
@@ -945,11 +480,55 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
             </div>
         </div>
         
-        <div class="card no-print" style="padding: 25px;"><h3 style="margin-bottom: 15px; font-size: 1.3em;">⚡ Cash in/ Cash out</h3>''' + ENTRY_FORM_HTML + '''</div>
+        <div class="card no-print" style="padding: 25px; overflow-x: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="margin:0; font-size: 1.3em;">⚡ Cash in/ Cash out</h3>
+                <button class="btn" style="background: #8b5cf6;" onclick="toggleFastMode()">🚀 Toggle Fast Mode</button>
+            </div>
+            
+            <!-- FAST MODE FORM -->
+            <div id="fast-mode-section" style="display:none; background:#e0e7ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #818cf8; overflow-x: auto;">
+               <form action="/add_fast_unified" method="POST" style="min-width: 800px;">
+                   <input type="hidden" name="source_page" value="{{ active_page }}">
+                   <div style="display:flex; gap:10px; margin-bottom:10px;">
+                       <input type="date" name="date" class="auto-date" required style="width: 150px;">
+                       <input type="time" name="time" class="auto-time" required style="width: 120px;">
+                       <select name="payment_mode" required style="width: 120px;"><option value="Cash">Cash</option><option value="Online">Online</option></select>
+                   </div>
+                   
+                   <table style="width: 100%; border: none; background: white;">
+                       <thead>
+                           <tr style="background: #c7d2fe;">
+                               <th style="font-size: 0.8em; padding: 8px;">Nature of Voucher</th>
+                               <th style="font-size: 0.8em; padding: 8px;">Ledger Account (- Deduct)</th>
+                               <th style="font-size: 0.8em; padding: 8px;">Approved By</th>
+                               <th style="font-size: 0.8em; padding: 8px;">Category</th>
+                               <th style="font-size: 0.8em; padding: 8px;">Description / Remarks</th>
+                               <th style="font-size: 0.8em; padding: 8px;">Amount (₹)</th>
+                               <th style="font-size: 0.8em; padding: 8px; text-align: center;">Act</th>
+                           </tr>
+                       </thead>
+                       <tbody id="fast-entry-body">
+                       </tbody>
+                   </table>
+                   
+                   <div style="display:flex; justify-content: space-between; margin-top: 10px;">
+                       <button type="button" class="btn btn-outline" onclick="addFastRow()" style="background:white;">+ Add New Row</button>
+                       <button class="btn btn-success" type="submit" style="padding: 10px 25px;">💾 Save Fast Batch</button>
+                   </div>
+               </form>
+            </div>
+            
+            <div id="batch-mode-section">
+                ''' + ENTRY_FORM_HTML + '''
+            </div>
+        </div>
         
         <div class="ledger-container">
-            <div class="ledger-col"><h3 class="ledger-title" style="color: var(--success); border-bottom: 3px solid var(--success);">Receipts (+ IN)</h3>
-                <table style="width: 100%; font-size: 0.95em;"><tr><th style="width: 5%;">Sr.</th><th>Date</th><th>Mode/Cat</th><th>Detail</th><th style="text-align: right;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th class="no-print">Act</th>{% endif %}</tr>
+            <div class="ledger-col"><h3 class="ledger-title" style="color: var(--success); border-bottom: 3px solid var(--success);">Receipts (+ IN) {% if active_filter != 'all' %}({{active_filter|title}}){% endif %}</h3>
+                <table style="width: 100%; font-size: 0.95em;">
+                    <thead><tr><th style="width: 5%;">Sr.</th><th>Date</th><th>Mode/Cat</th><th>Detail</th><th style="text-align: right;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th class="no-print">Act</th>{% endif %}</tr></thead>
+                    <tbody id="receipts-tbody">
                     {% for t in incomes %}<tr>
                         <td style="color: #64748b; font-weight: bold;">{{ loop.index }}</td>
                         <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
@@ -965,11 +544,20 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
                         {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
                         <td style="text-align: center;" class="no-print"><a href="/edit/transactions/{{ t.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/transactions/{{ t.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
                         {% endif %}
-                    </tr>{% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No entries yet.</td></tr>{% endfor %}
+                    </tr>{% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No entries matching criteria.</td></tr>{% endfor %}
+                    </tbody>
                 </table>
+                <div class="pagination-controls no-print">
+                    <button class="btn btn-outline btn-sm" onclick="prevReceipts()">← Previous</button>
+                    <span id="receipt-page-info" style="font-size: 0.9em; font-weight: 500;">Page 1</span>
+                    <button class="btn btn-outline btn-sm" onclick="nextReceipts()">Next →</button>
+                </div>
             </div>
-            <div class="ledger-col"><h3 class="ledger-title" style="color: var(--danger); border-bottom: 3px solid var(--danger);">Payments (- OUT)</h3>
-                <table style="width: 100%; font-size: 0.95em;"><tr><th style="width: 5%;">Sr.</th><th>Date</th><th>Mode/Cat</th><th>Detail</th><th style="text-align: right;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th class="no-print">Act</th>{% endif %}</tr>
+            
+            <div class="ledger-col"><h3 class="ledger-title" style="color: var(--danger); border-bottom: 3px solid var(--danger);">Payments (- OUT) {% if active_filter != 'all' %}({{active_filter|title}}){% endif %}</h3>
+                <table style="width: 100%; font-size: 0.95em;">
+                    <thead><tr><th style="width: 5%;">Sr.</th><th>Date</th><th>Mode/Cat</th><th>Detail</th><th style="text-align: right;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th class="no-print">Act</th>{% endif %}</tr></thead>
+                    <tbody id="payments-tbody">
                     {% for t in expenses %}<tr>
                         <td style="color: #64748b; font-weight: bold;">{{ loop.index }}</td>
                         <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
@@ -985,38 +573,88 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
                         {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
                         <td style="text-align: center;" class="no-print"><a href="/edit/transactions/{{ t.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/transactions/{{ t.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
                         {% endif %}
-                    </tr>{% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No entries yet.</td></tr>{% endfor %}
+                    </tr>{% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No entries matching criteria.</td></tr>{% endfor %}
+                    </tbody>
                 </table>
+                <div class="pagination-controls no-print">
+                    <button class="btn btn-outline btn-sm" onclick="prevPayments()">← Previous</button>
+                    <span id="payment-page-info" style="font-size: 0.9em; font-weight: 500;">Page 1</span>
+                    <button class="btn btn-outline btn-sm" onclick="nextPayments()">Next →</button>
+                </div>
             </div>
         </div>
     </div>
+    
+    <script>
+        const approverOpts = `<option value="">-- Pending --</option>{% for u in approver_names %}<option value="{{u}}">{{u}}</option>{% endfor %}`;
+        const accountOpts = `<option value="main">🏢 Main Book</option><optgroup label="👥 Persons">{% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}</option>{% endfor %}</optgroup><optgroup label="💸 Dasti">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}</option>{% endfor %}</optgroup>`;
+        const catOpts = `{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}`;
+        
+        function addFastRow() {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="padding:5px;"><select name="txn_nature[]" required style="font-size:0.85em; padding:6px; font-weight:bold;"><option value="slip_in" style="color:red;">➖ Slip/Bill</option><option value="advance" style="color:blue;">📤 Advance</option><option value="receive_cash" style="color:green;">📥 Receive Cash</option></select></td>
+                <td style="padding:5px;"><select name="primary_account[]" required style="font-size:0.85em; padding:6px; font-weight:bold;">${accountOpts}</select></td>
+                <td style="padding:5px;"><select name="approved_by_select[]" style="font-size:0.85em; padding:6px;">${approverOpts}</select></td>
+                <td style="padding:5px;"><select name="category[]" required style="font-size:0.85em; padding:6px;">${catOpts}</select></td>
+                <td style="padding:5px;"><input type="text" name="description[]" required style="font-size:0.85em; padding:6px;"></td>
+                <td style="padding:5px;"><input type="number" step="0.01" min="0" name="amount[]" value="0" required style="font-size:0.85em; padding:6px;"></td>
+                <td style="padding:5px; text-align:center;"><button type="button" onclick="this.closest('tr').remove()" style="background:var(--danger); padding:4px 8px;">X</button></td>
+            `;
+            document.getElementById('fast-entry-body').appendChild(tr);
+        }
+
+        function toggleFastMode() {
+            const fm = document.getElementById('fast-mode-section');
+            const bm = document.getElementById('batch-mode-section');
+            if(fm.style.display === 'none') {
+                fm.style.display = 'block';
+                bm.style.display = 'none';
+                setAutoDateTime();
+                if(document.getElementById('fast-entry-body').children.length === 0) addFastRow();
+            } else {
+                fm.style.display = 'none';
+                bm.style.display = 'block';
+            }
+        }
+        
+        let currentReceiptPage = 1;
+        let currentPaymentPage = 1;
+        const rowsPerPage = 10;
+
+        function renderTable(tableId, page, spanId) {
+            const tbody = document.getElementById(tableId);
+            if(!tbody) return page;
+            const rows = Array.from(tbody.getElementsByTagName('tr'));
+            
+            const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage));
+            if(page < 1) page = 1;
+            if(page > totalPages) page = totalPages;
+            
+            rows.forEach((row, index) => {
+                if(index >= (page-1)*rowsPerPage && index < page*rowsPerPage) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+            const infoSpan = document.getElementById(spanId);
+            if(infoSpan) infoSpan.innerText = `Page ${page} of ${totalPages}`;
+            return page;
+        }
+
+        function prevReceipts() { currentReceiptPage = renderTable('receipts-tbody', currentReceiptPage - 1, 'receipt-page-info'); }
+        function nextReceipts() { currentReceiptPage = renderTable('receipts-tbody', currentReceiptPage + 1, 'receipt-page-info'); }
+        function prevPayments() { currentPaymentPage = renderTable('payments-tbody', currentPaymentPage - 1, 'payment-page-info'); }
+        function nextPayments() { currentPaymentPage = renderTable('payments-tbody', currentPaymentPage + 1, 'payment-page-info'); }
+
+        document.addEventListener("DOMContentLoaded", function() {
+            renderTable('receipts-tbody', 1, 'receipt-page-info');
+            renderTable('payments-tbody', 1, 'payment-page-info');
+            setAutoDateTime();
+        });
+    </script>
 </body></html>'''
-
-TRASH_TEMPLATE = '''<!DOCTYPE html><html><head><title>Trash / Recycle Bin</title>''' + BASE_STYLE + '''</head><body>
-    <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card" style="padding: 0;">
-            <h3 style="padding: 15px 20px; margin: 0; background: #fee2e2; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #991b1b;">🗑️ Deleted Vouchers & Entries (Trash)</h3>
-            <form method="POST">
-                <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; gap: 10px;">
-                    <button type="submit" formaction="/bulk_restore_trash" class="btn btn-success btn-sm" onclick="return confirm('Restore selected entries?');">♻️ Restore Selected</button>
-                    <button type="submit" formaction="/bulk_hard_delete_trash" class="btn btn-sm" style="background:#dc2626; color:white;" onclick="return confirm('Permanently delete selected? This cannot be undone.');">🔥 Delete Selected Forever</button>
-                </div>
-                <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th><th>Date & Time</th><th>Category / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>
-                    {% for t in trashed %}<tr>
-                        <td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
-                        <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ t.category }}</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
-                        <td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td>
-                        <td style="text-align: center;">
-                            <a href="/restore_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Restore this transaction?');">♻️</a>
-                            <a href="/hard_delete_voucher/{{ t.link_id }}" class="btn btn-sm" style="background:#dc2626; color:white; margin-left:5px;" onclick="return confirm('Permanently delete? This cannot be undone.');">🔥</a>
-                        </td>
-                    </tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">Trash is empty.</td></tr>{% endfor %}
-                </table>
-            </form>
-        </div>
-    </div></body></html>'''
-
 REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dynamic Reports</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
         <div class="card no-print" style="padding: 25px; margin-bottom: 25px;">
@@ -1066,7 +704,6 @@ REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dynamic Reports</title>'
                         <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
                         <td style="white-space: pre-wrap;">{{ txn.description }}
                             {% if txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                            {% if txn.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
                         </td>
                         <td style="text-align: right;">
                             {% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'advance'] %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(txn.amount) }}</span>
@@ -1077,6 +714,239 @@ REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dynamic Reports</title>'
             </table>
         </div>
     </div></body></html>'''
+
+
+TRASH_TEMPLATE = '''<!DOCTYPE html><html><head><title>Trash / Recycle Bin</title>''' + BASE_STYLE + '''</head><body>
+    <div class="container">''' + NAVBAR_HTML + '''
+        <div class="card" style="padding: 0;">
+            <h3 style="padding: 15px 20px; margin: 0; background: #fee2e2; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #991b1b;">🗑️ Deleted Vouchers & Entries (Trash)</h3>
+            <form method="POST">
+                <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; gap: 10px;">
+                    <button type="submit" formaction="/bulk_restore_trash" class="btn btn-success btn-sm" onclick="return confirm('Restore selected entries?');">♻️ Restore Selected</button>
+                    <button type="submit" formaction="/bulk_hard_delete_trash" class="btn btn-sm" style="background:#dc2626; color:white;" onclick="return confirm('Permanently delete selected? This cannot be undone.');">🔥 Delete Selected Forever</button>
+                </div>
+                <table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th><th>Date & Time</th><th>Category / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>
+                    {% for t in trashed %}<tr>
+                        <td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
+                        <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
+                        <td><span class="badge badge-mode">{{ t.category }}</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td>
+                        <td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td>
+                        <td style="text-align: center;">
+                            <a href="/restore_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Restore this transaction?');">♻️</a>
+                            <a href="/hard_delete_voucher/{{ t.link_id }}" class="btn btn-sm" style="background:#dc2626; color:white; margin-left:5px;" onclick="return confirm('Permanently delete? This cannot be undone.');">🔥</a>
+                        </td>
+                    </tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">Trash is empty.</td></tr>{% endfor %}
+                </table>
+            </form>
+        </div>
+    </div></body></html>'''
+
+BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correction</title>''' + BASE_STYLE + '''</head><body>
+    <div class="container">''' + NAVBAR_HTML + '''
+        <div class="card">
+            <h3 style="margin-top: 0; color: var(--primary);">📅 Search & Bulk Update Dates</h3>
+            <form action="/bulk_edit_date" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+                <input type="hidden" name="action" value="search">
+                <div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}" required></div>
+                <div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" value="{{ end_date }}" required></div>
+                <button class="btn" style="background:indigo; height: 45px; padding: 10px 25px;" type="submit">🔍 Search Entries</button>
+            </form>
+        </div>
+        
+        {% if has_searched %}
+        <div class="card" style="padding: 0;">
+            <form action="/bulk_edit_date" method="POST" onsubmit="return confirm('Are you sure you want to change the date for ALL selected entries?');">
+                <input type="hidden" name="action" value="update_dates">
+                
+                <div style="padding: 15px 20px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 15px;">
+                    
+                    <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+                        <div class="form-group" style="margin-bottom: 0; min-width: 250px;">
+                            <label style="color:#92400e;">Set New Date For Selected Entries:</label>
+                            <input type="date" name="new_date" required style="border-color: var(--warning); font-weight:bold; background: white;">
+                        </div>
+                        <button type="submit" class="btn btn-warning" style="height: 43px; padding: 0 25px;">✏️ Update Selected Dates</button>
+                    </div>
+
+                    <!-- DYNAMIC SUMMARY BAR -->
+                    <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; background: #fef3c7; padding: 10px 15px; border-radius: 8px; border: 1px solid #fde68a;">
+                        <div style="display: flex; flex-direction: column; min-width: 150px;">
+                            <span style="color:#92400e; font-weight:bold; font-size: 0.9em;">Entries Selected</span>
+                            <strong id="calc-count" style="font-size: 1.3em;">0</strong>
+                        </div>
+                        
+                        <div style="display: flex; flex-direction: column; min-width: 150px;">
+                            <span style="color: var(--success); font-weight:bold; font-size: 0.9em;">Total Positive (+)</span>
+                            <strong id="calc-positive" style="font-size: 1.3em;">₹0.00</strong>
+                        </div>
+                        
+                        <div style="display: flex; flex-direction: column; min-width: 150px;">
+                            <span style="color: var(--danger); font-weight:bold; font-size: 0.9em;">Total Negative (-)</span>
+                            <strong id="calc-negative" style="font-size: 1.3em;">₹0.00</strong>
+                        </div>
+
+                        <!-- TARGET MATCH INPUTS -->
+                        <div style="display: flex; gap: 10px; margin-left: auto; background: white; padding: 8px; border-radius: 6px; border: 1px dashed #d1d5db;">
+                            <div class="form-group" style="margin: 0;">
+                                <label style="font-size: 0.75em; color: var(--success);">Target Match (+)</label>
+                                <input type="number" id="target-pos" placeholder="e.g. 5000" onkeyup="calculateSelection()" onchange="calculateSelection()" style="padding: 4px; width: 100px; font-size: 0.9em; border-color: var(--success);">
+                            </div>
+                            <div class="form-group" style="margin: 0;">
+                                <label style="font-size: 0.75em; color: var(--danger);">Target Match (-)</label>
+                                <input type="number" id="target-neg" placeholder="e.g. 1200" onkeyup="calculateSelection()" onchange="calculateSelection()" style="padding: 4px; width: 100px; font-size: 0.9em; border-color: var(--danger);">
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+                
+                <table style="width: 100%; border: none;">
+                    <tr>
+                        <th style="padding-left: 20px; width: 40px;">
+                            <input type="checkbox" id="master-checkbox" onclick="toggleAllCheckboxes(this)" style="width:16px; height:16px; cursor:pointer;">
+                        </th>
+                        <th>Current Date & Time</th>
+                        <th>Category / Detail</th>
+                        <th style="text-align: right; padding-right: 20px;">Amount</th>
+                    </tr>
+                    {% for t in results %}
+                    <tr>
+                        <td style="padding-left: 20px;">
+                            <input type="checkbox" name="selected_links" class="row-checkbox" value="{{ t.link_id }}" 
+                                   data-amount="{{ t.amount }}" 
+                                   data-txn-type="{% if t.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'advance'] %}out{% else %}in{% endif %}" 
+                                   data-desc="{{ t.get('description', '') | replace('\"', '&quot;') | replace('\n', ' ') }}"
+                                   onchange="calculateSelection()" 
+                                   style="width:16px; height:16px; cursor:pointer;">
+                        </td>
+                        <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
+                        <td><span class="badge badge-mode">{{ t.category }}</span><br><span style="white-space: pre-wrap;">{{ t.get('description', '') }}</span></td>
+                        <td style="text-align: right; padding-right: 20px;">
+                            {% if t.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'advance'] %}
+                                <strong style="color:red;">- ₹{{ "{:,.2f}".format(t.amount | default(0)) }}</strong>
+                            {% else %}
+                                <strong style="color:green;">+ ₹{{ "{:,.2f}".format(t.amount | default(0)) }}</strong>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No entries found in this date range.</td></tr>
+                    {% endfor %}
+                </table>
+                
+                <!-- AI RECONCILIATION SUGGESTION PANEL -->
+                <div id="suggestion-panel" style="margin: 20px; padding: 15px; background: #f0fdf4; border: 2px solid #86efac; border-radius: 8px; display: none;">
+                    <h4 style="margin-top: 0; color: #166534; display: flex; align-items: center; gap: 8px;">🤖 Match Diagnostics</h4>
+                    <div id="pos-suggestion" style="margin-bottom: 8px; font-size: 0.95em; color: #065f46;"></div>
+                    <div id="neg-suggestion" style="font-size: 0.95em; color: #991b1b;"></div>
+                </div>
+
+            </form>
+        </div>
+        
+        <script>
+            function toggleAllCheckboxes(masterCheckbox) {
+                let checkboxes = document.querySelectorAll('.row-checkbox');
+                checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
+                calculateSelection();
+            }
+
+            function calculateSelection() {
+                let checkboxes = document.querySelectorAll('.row-checkbox');
+                let count = 0;
+                let totalPositive = 0;
+                let totalNegative = 0;
+
+                let selectedPos = []; let unselectedPos = [];
+                let selectedNeg = []; let unselectedNeg = [];
+
+                checkboxes.forEach(cb => {
+                    let amount = parseFloat(cb.getAttribute('data-amount')) || 0;
+                    let type = cb.getAttribute('data-txn-type');
+                    
+                    if (cb.checked) {
+                        count++;
+                        if (type === 'in') { totalPositive += amount; selectedPos.push(cb); }
+                        else { totalNegative += amount; selectedNeg.push(cb); }
+                    } else {
+                        if (type === 'in') { unselectedPos.push(cb); }
+                        else { unselectedNeg.push(cb); }
+                    }
+                });
+
+                let fmt = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
+                document.getElementById('calc-count').innerText = count;
+                document.getElementById('calc-positive').innerText = fmt.format(totalPositive).replace('₹', '₹');
+                document.getElementById('calc-negative').innerText = fmt.format(totalNegative).replace('₹', '₹');
+
+                let targetPosRaw = document.getElementById('target-pos').value;
+                let targetNegRaw = document.getElementById('target-neg').value;
+                let targetPos = parseFloat(targetPosRaw) || 0;
+                let targetNeg = parseFloat(targetNegRaw) || 0;
+                
+                let panel = document.getElementById('suggestion-panel');
+                let pSugg = document.getElementById('pos-suggestion');
+                let nSugg = document.getElementById('neg-suggestion');
+                
+                pSugg.innerHTML = "";
+                nSugg.innerHTML = "";
+
+                if (targetPosRaw !== "" || targetNegRaw !== "") {
+                    panel.style.display = 'block';
+
+                    if (targetPosRaw !== "") {
+                        let diffPos = totalPositive - targetPos;
+                        if (Math.abs(diffPos) < 0.01) {
+                            pSugg.innerHTML = "<strong>Positive (+):</strong> ✅ Balances match perfectly!";
+                        } else if (diffPos > 0) {
+                            let matches = selectedPos.filter(cb => Math.abs(parseFloat(cb.dataset.amount) - diffPos) < 0.01);
+                            if (matches.length > 0) {
+                                pSugg.innerHTML = `<strong>Positive (+):</strong> You selected ₹${diffPos.toFixed(2)} too much. <br>💡 <strong>Suggestion: UNCHECK</strong> ➔ "${matches[0].dataset.desc}" (₹${diffPos.toFixed(2)})`;
+                            } else {
+                                pSugg.innerHTML = `<strong>Positive (+):</strong> You selected ₹${diffPos.toFixed(2)} too much. (No single selected voucher matches this exact amount).`;
+                            }
+                        } else {
+                            let need = Math.abs(diffPos);
+                            let matches = unselectedPos.filter(cb => Math.abs(parseFloat(cb.dataset.amount) - need) < 0.01);
+                            if (matches.length > 0) {
+                                pSugg.innerHTML = `<strong>Positive (+):</strong> You are short by ₹${need.toFixed(2)}. <br>💡 <strong>Suggestion: CHECK</strong> ➔ "${matches[0].dataset.desc}" (₹${need.toFixed(2)})`;
+                            } else {
+                                pSugg.innerHTML = `<strong>Positive (+):</strong> You are short by ₹${need.toFixed(2)}. (Consider creating a new entry for this exact amount).`;
+                            }
+                        }
+                    }
+
+                    if (targetNegRaw !== "") {
+                        let diffNeg = totalNegative - targetNeg;
+                        if (Math.abs(diffNeg) < 0.01) {
+                            nSugg.innerHTML = "<strong>Negative (-):</strong> ✅ Balances match perfectly!";
+                        } else if (diffNeg > 0) {
+                            let matches = selectedNeg.filter(cb => Math.abs(parseFloat(cb.dataset.amount) - diffNeg) < 0.01);
+                            if (matches.length > 0) {
+                                nSugg.innerHTML = `<strong>Negative (-):</strong> You selected ₹${diffNeg.toFixed(2)} too much. <br>💡 <strong>Suggestion: UNCHECK</strong> ➔ "${matches[0].dataset.desc}" (₹${diffNeg.toFixed(2)})`;
+                            } else {
+                                nSugg.innerHTML = `<strong>Negative (-):</strong> You selected ₹${diffNeg.toFixed(2)} too much. (No single selected voucher matches this exact amount).`;
+                            }
+                        } else {
+                            let need = Math.abs(diffNeg);
+                            let matches = unselectedNeg.filter(cb => Math.abs(parseFloat(cb.dataset.amount) - need) < 0.01);
+                            if (matches.length > 0) {
+                                nSugg.innerHTML = `<strong>Negative (-):</strong> You are short by ₹${need.toFixed(2)}. <br>💡 <strong>Suggestion: CHECK</strong> ➔ "${matches[0].dataset.desc}" (₹${need.toFixed(2)})`;
+                            } else {
+                                nSugg.innerHTML = `<strong>Negative (-):</strong> You are short by ₹${need.toFixed(2)}. (Consider creating a new entry for this exact amount).`;
+                            }
+                        }
+                    }
+                } else {
+                    panel.style.display = 'none';
+                }
+            }
+        </script>
+        {% endif %}
+    </div>
+</body></html>'''
+
+
 
 MAIN_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Ledger</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
@@ -1121,7 +991,6 @@ MAIN_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Ledge
                             <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
                             <td style="white-space: pre-wrap;">{{ txn.description }}
                                 {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                                {% if txn.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
                             </td>
                             <td style="text-align: right;">
                                 {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
@@ -1147,6 +1016,7 @@ MAIN_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Ledge
         }
     </script>
 </body></html>'''
+
 
 PERSONS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Person Ledgers</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
@@ -1205,7 +1075,6 @@ PERSON_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Account: {{ perso
                             <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
                             <td style="white-space: pre-wrap;">{{ txn.description }}
                                 {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                                {% if txn.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
                             </td>
                             <td style="text-align: right;">
                                 {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
@@ -1231,6 +1100,7 @@ PERSON_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Account: {{ perso
         }
     </script>
 </body></html>'''
+
 
 DASTI_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Ledger</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
@@ -1302,7 +1172,6 @@ DASTI_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Account: {{ 
                             <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
                             <td style="white-space: pre-wrap;">{{ txn.description }}
                                 {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                                {% if txn.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
                             </td>
                             <td style="text-align: right;">
                                 {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
@@ -1329,6 +1198,202 @@ DASTI_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Account: {{ 
     </script>
 </body></html>'''
 
+
+REGISTER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Setup</title>''' + BASE_STYLE + '''</head><body><div class="container"><div class="card" style="max-width: 450px; margin: 80px auto; text-align: center;"><h2 style="color: var(--primary);">Setup Superadmin</h2><form action="/register" method="POST" style="text-align: left;"><div class="form-group"><label>Firm Name</label><input type="text" name="firm_name" required></div><div class="form-group"><label>Opening Cash Book Balance (₹)</label><input type="number" step="0.01" min="0" name="opening_balance" value="0" required></div><div class="form-group"><label>Superadmin Username</label><input type="text" name="username" required></div><div class="form-group"><label>Password</label><input type="password" name="password" required></div><button type="submit" style="width: 100%;">Initialize Firm Account</button></form></div></div></body></html>'''
+
+LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System 404</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+    body { background-color: #111; color: #0f0; font-family: monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; flex-direction: column; transition: background 0.5s ease; touch-action: none; }
+    .hud { display: flex; justify-content: space-between; align-items: center; width: 400px; max-width: 95vw; margin-bottom: 10px; font-size: 1.2em; font-weight: bold; }
+    canvas { border: 2px solid #333; background-color: #000; box-shadow: 0 0 15px rgba(0, 255, 0, 0.2); max-width: 95vw; max-height: 50vh; }
+    #login-container { display: none; position: absolute; z-index: 10; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); font-family: 'Poppins', sans-serif; color: #333; width: 350px; max-width: 90vw; }
+    h2 { color: #4f46e5; margin-top: 0; text-align: center; }
+    .form-group { margin-bottom: 15px; display: flex; flex-direction: column; }
+    label { font-weight: 600; margin-bottom: 5px; font-size: 0.85em; color: #4b5563; }
+    input { padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1em; }
+    button { background: #4f46e5; color: white; border: none; padding: 10px; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 10px; width: 100%; font-size: 1em;}
+    button:hover { background: #4338ca; }
+    
+    .controls { display: none; grid-template-columns: 60px 60px 60px; grid-template-rows: 60px 60px; gap: 10px; margin-top: 20px; justify-content: center; }
+    .btn-ctrl { background: rgba(0, 255, 0, 0.2); border: 2px solid #0f0; color: #0f0; border-radius: 8px; font-size: 1.5em; display: flex; justify-content: center; align-items: center; user-select: none; }
+    .btn-ctrl:active { background: rgba(0, 255, 0, 0.5); }
+    .btn-up { grid-column: 2; grid-row: 1; }
+    .btn-left { grid-column: 1; grid-row: 2; }
+    .btn-down { grid-column: 2; grid-row: 2; }
+    .btn-right { grid-column: 3; grid-row: 2; }
+    @media (max-width: 768px) { .controls { display: grid; } }
+    #game-over-msg { display: none; color: red; text-align: center; margin-top: 20px; font-size: 1.2em; font-family: 'Poppins', sans-serif; font-weight: bold; }
+    
+    {% if settings.game_enabled == 0 and not is_demo %}
+    #game-wrapper { display: none !important; } 
+    #login-container { display: block !important; position: static; margin: auto; }
+    body { background-color: #f8fafc; }
+    {% endif %}
+</style>
+</head><body>
+    <div id="game-wrapper">
+        {% if is_demo %}
+        <div style="text-align:center; color:#fff; font-family:'Poppins', sans-serif; margin-bottom:10px;">
+            <h3>🎮 Admin Demo Mode</h3>
+            <p style="font-size: 0.8em; margin-top:-10px;">Test speed and unlock settings.</p>
+        </div>
+        {% endif %}
+        <div class="hud">
+            <div id="timeDisplay">Time: 0s</div>
+            <div id="scoreDisplay">Score: 0 / {{ settings.blocks_to_eat }}</div>
+        </div>
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+        <div id="game-over-msg">Game Over.<br>Refresh page to restart.</div>
+        <div class="controls">
+            <div class="btn-ctrl btn-up" id="btnUp">▲</div>
+            <div class="btn-ctrl btn-left" id="btnLeft">◀</div>
+            <div class="btn-ctrl btn-down" id="btnDown">▼</div>
+            <div class="btn-ctrl btn-right" id="btnRight">▶</div>
+        </div>
+    </div>
+
+    <div id="login-container">
+        {% if is_demo %}
+        <h2 style="color:var(--success);">✅ Demo Passed!</h2>
+        <p style="text-align:center;">The game unlocked successfully with current settings.</p>
+        <button onclick="window.close()" style="background:var(--success);">Close Demo</button>
+        {% else %}
+        <h2>System Access</h2>
+        <form action="/login" method="POST">
+            <div class="form-group"><label>Username</label><input type="text" name="username" required></div>
+            <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
+            <button type="submit">Secure Login</button>
+        </form>
+        {% endif %}
+    </div>
+
+    <script>
+        {% if settings.game_enabled != 0 or is_demo %}
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const grid = 20;
+        
+        let speedMod = parseInt("{{ settings.game_speed }}") || 0;
+        let delayMs = 100 - (speedMod * 10);
+        if (delayMs < 20) delayMs = 20;
+        if (delayMs > 500) delayMs = 500;
+        let gameTimer;
+        
+        let snake = { x: 160, y: 160, dx: grid, dy: 0, cells: [], maxCells: 4 };
+        let apple = { x: 320, y: 320 };
+        
+        let score = 0;
+        let targetScore = parseInt("{{ settings.blocks_to_eat }}") || 4;
+        let startTime = Math.floor(Date.now() / 1000);
+        let isGameOver = false;
+        let loginUnlocked = false;
+        let loginLockedForever = false;
+        
+        let targetX = 0, targetY = 0;
+        const targetCorner = "{{ settings.unlock_corner }}";
+        if(targetCorner === 'br') { targetX = canvas.width - grid; targetY = canvas.height - grid; }
+        else if(targetCorner === 'bl') { targetX = 0; targetY = canvas.height - grid; }
+        else if(targetCorner === 'tr') { targetX = canvas.width - grid; targetY = 0; }
+        else if(targetCorner === 'tl') { targetX = 0; targetY = 0; }
+
+        function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min)) + min; }
+
+        function triggerGameOver() {
+            isGameOver = true;
+            clearTimeout(gameTimer);
+            document.getElementById('game-over-msg').style.display = 'block';
+        }
+
+        function loop() {
+            if (isGameOver) return; 
+            gameTimer = setTimeout(loop, delayMs);
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            document.getElementById('timeDisplay').innerText = 'Time: ' + (Math.floor(Date.now() / 1000) - startTime) + 's';
+
+            snake.x += snake.dx;
+            snake.y += snake.dy;
+
+            if (snake.x < 0) { snake.x = canvas.width - grid; } 
+            else if (snake.x >= canvas.width) { snake.x = 0; }
+            if (snake.y < 0) { snake.y = canvas.height - grid; } 
+            else if (snake.y >= canvas.height) { snake.y = 0; }
+
+            snake.cells.unshift({ x: snake.x, y: snake.y });
+            if (snake.cells.length > snake.maxCells) snake.cells.pop();
+
+            ctx.fillStyle = 'red';
+            ctx.fillRect(apple.x, apple.y, grid - 1, grid - 1);
+
+            ctx.fillStyle = '#0f0';
+            snake.cells.forEach(function(cell, index) {
+                ctx.fillRect(cell.x, cell.y, grid - 1, grid - 1);
+                
+                if (cell.x === apple.x && cell.y === apple.y) {
+                    snake.maxCells++;
+                    score++;
+                    document.getElementById('scoreDisplay').innerText = 'Score: ' + score + ' / ' + targetScore;
+                    
+                    if (score === targetScore) { 
+                        loginUnlocked = true; 
+                    } else if (score === targetScore + 1) { 
+                        loginUnlocked = false; 
+                        loginLockedForever = true; 
+                    }
+
+                    apple.x = getRandomInt(0, 20) * grid;
+                    apple.y = getRandomInt(0, 20) * grid;
+                }
+                
+                for (let i = index + 1; i < snake.cells.length; i++) {
+                    if (cell.x === snake.cells[i].x && cell.y === snake.cells[i].y) {
+                        triggerGameOver(); return;
+                    }
+                }
+            });
+
+            if (snake.x === targetX && snake.y === targetY) {
+                if (loginUnlocked && !loginLockedForever) {
+                    isGameOver = true;
+                    clearTimeout(gameTimer);
+                    document.getElementById('game-wrapper').style.display = 'none';
+                    document.getElementById('login-container').style.display = 'block';
+                    document.body.style.background = '#f8fafc';
+                }
+            }
+        }
+
+        function setDir(dx, dy) {
+            if(isGameOver) return;
+            if (dx !== 0 && snake.dx === 0) { snake.dx = dx; snake.dy = dy; }
+            else if (dy !== 0 && snake.dy === 0) { snake.dy = dy; snake.dx = dx; }
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.which === 37) setDir(-grid, 0);
+            else if (e.which === 38) setDir(0, -grid);
+            else if (e.which === 39) setDir(grid, 0);
+            else if (e.which === 40) setDir(0, grid);
+        });
+
+        document.getElementById('btnUp').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, -grid); }, {passive: false});
+        document.getElementById('btnDown').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, grid); }, {passive: false});
+        document.getElementById('btnLeft').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(-grid, 0); }, {passive: false});
+        document.getElementById('btnRight').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(grid, 0); }, {passive: false});
+        
+        document.getElementById('btnUp').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(0, -grid); });
+        document.getElementById('btnDown').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(0, grid); });
+        document.getElementById('btnLeft').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(-grid, 0); });
+        document.getElementById('btnRight').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(grid, 0); });
+
+        loop();
+        {% endif %}
+    </script>
+</body></html>'''
+
 # --- FIREBASE HELPER LOGIC ---
 def has_users():
     docs = db.collection('users').limit(1).stream()
@@ -1351,6 +1416,9 @@ def index():
     if 'user_id' not in session: return redirect(url_for('login'))
     firm_id = session['firm_id']
     
+    # Get active dashboard filter ('all', 'today', 'yesterday', 'week', 'month', 'year')
+    time_filter = request.args.get('filter', 'all')
+    
     persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('persons').where('user_id', '==', firm_id).stream()]
     persons.sort(key=lambda x: x.get('name', ''))
     
@@ -1358,16 +1426,63 @@ def index():
     dasti_persons.sort(key=lambda x: x.get('name', ''))
     
     all_txns = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
+    all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
     
-    incomes = [t for t in all_txns if t.get('type') == 'income']
-    expenses = [t for t in all_txns if t.get('type') in ('expense', 'batch_ledger_out')]
+    # Summary calculations using proper IST timezone
+    summary_txns = [t for t in all_txns if t.get('status') == 'approved']
+    now = datetime.now(IST)
+    today_str = now.strftime('%Y-%m-%d')
+    yesterday_str = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+    month_str = now.strftime('%Y-%m')
+    year_str = now.strftime('%Y')
+    week_ago_str = (now - timedelta(days=7)).strftime('%Y-%m-%d')
     
-    incomes.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)))
-    expenses.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)))
+    s_d_in = s_d_out = s_yest_in = s_yest_out = s_w_in = s_w_out = s_m_in = s_m_out = s_y_in = s_y_out = 0
+    total_in_actual = 0
+    total_out_actual = 0
     
-    total_in_actual = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in') and t.get('status') == 'approved')
-    total_out_actual = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out') and t.get('status') == 'approved')
+    for r in summary_txns:
+        amt, d, ttype = float(r.get('amount', 0)), r.get('date', ''), r.get('type', '')
+        is_in = ttype in ('income', 'dasti_voucher_in')
+        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out') 
+        
+        if is_in: total_in_actual += amt
+        if is_out: total_out_actual += amt
+            
+        if d.startswith(year_str):
+            if is_in: s_y_in += amt 
+            elif is_out: s_y_out += amt
+        if d.startswith(month_str):
+            if is_in: s_m_in += amt 
+            elif is_out: s_m_out += amt
+        if d >= week_ago_str:
+            if is_in: s_w_in += amt 
+            elif is_out: s_w_out += amt
+        if d == today_str:
+            if is_in: s_d_in += amt 
+            elif is_out: s_d_out += amt
+        if d == yesterday_str:
+            if is_in: s_yest_in += amt 
+            elif is_out: s_yest_out += amt
+
     main_balance = total_in_actual - total_out_actual
+    
+    # Filter Tables (Receipts/Payments) based on user selection
+    incomes = []
+    expenses = []
+    
+    for t in all_txns:
+        d = t.get('date', '')
+        if time_filter == 'today' and d != today_str: continue
+        if time_filter == 'yesterday' and d != yesterday_str: continue
+        if time_filter == 'week' and d < week_ago_str: continue
+        if time_filter == 'month' and not d.startswith(month_str): continue
+        if time_filter == 'year' and not d.startswith(year_str): continue
+        
+        if t.get('type') == 'income':
+            incomes.append(t)
+        elif t.get('type') in ('expense', 'batch_ledger_out'):
+            expenses.append(t)
 
     all_person_ledger = [doc.to_dict() for doc in db.collection('person_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     all_dasti_ledger = [doc.to_dict() for doc in db.collection('dasti_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
@@ -1389,36 +1504,11 @@ def index():
         adv = sum(float(l.get('amount', 0)) for l in all_dasti_ledger if l.get('dasti_person_id') == dp['id'] and l.get('type') == 'advance' and l.get('status') == 'approved')
         setl = sum(float(l.get('amount', 0)) for l in all_dasti_ledger if l.get('dasti_person_id') == dp['id'] and l.get('type') == 'settlement' and l.get('status') == 'approved')
         acc_bals[f"dasti_{dp['id']}"] = adv - setl
-            
-    summary_txns = [t for t in all_txns if t.get('status') == 'approved']
-    now = datetime.now()
-    today_str = now.strftime('%Y-%m-%d')
-    month_str = now.strftime('%Y-%m')
-    year_str = now.strftime('%Y')
-    week_ago_str = (now - timedelta(days=7)).strftime('%Y-%m-%d')
-    
-    s_d_in = s_d_out = s_w_in = s_w_out = s_m_in = s_m_out = s_y_in = s_y_out = 0
-    for r in summary_txns:
-        amt, d, ttype = float(r.get('amount', 0)), r.get('date', ''), r.get('type', '')
-        is_in = ttype in ('income', 'dasti_voucher_in')
-        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out') 
-        if d.startswith(year_str):
-            if is_in: s_y_in += amt 
-            elif is_out: s_y_out += amt
-        if d.startswith(month_str):
-            if is_in: s_m_in += amt 
-            elif is_out: s_m_out += amt
-        if d >= week_ago_str:
-            if is_in: s_w_in += amt 
-            elif is_out: s_w_out += amt
-        if d == today_str:
-            if is_in: s_d_in += amt 
-            elif is_out: s_d_out += amt
 
     cats = get_categories(firm_id)
     approver_names = get_approvers(firm_id)
     
-    return render_template_string(INDEX_TEMPLATE, persons=persons, dasti_persons=dasti_persons, incomes=incomes, expenses=expenses, balance=main_balance, account_balances=json.dumps(acc_bals), total_dasti=total_dasti_ledger, dasti_breakdown=dasti_breakdown, categories=cats, approver_names=approver_names, s_d_in=s_d_in, s_d_out=s_d_out, s_w_in=s_w_in, s_w_out=s_w_out, s_m_in=s_m_in, s_m_out=s_m_out, s_y_in=s_y_in, s_y_out=s_y_out, username=session['username'], active_page='home')
+    return render_template_string(INDEX_TEMPLATE, persons=persons, dasti_persons=dasti_persons, incomes=incomes, expenses=expenses, balance=main_balance, account_balances=json.dumps(acc_bals), total_dasti=total_dasti_ledger, dasti_breakdown=dasti_breakdown, categories=cats, approver_names=approver_names, s_d_in=s_d_in, s_d_out=s_d_out, s_yest_in=s_yest_in, s_yest_out=s_yest_out, s_w_in=s_w_in, s_w_out=s_w_out, s_m_in=s_m_in, s_m_out=s_m_out, s_y_in=s_y_in, s_y_out=s_y_out, active_filter=time_filter, username=session['username'], active_page='home')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -1469,6 +1559,89 @@ def update_settings():
         'report_pdf_format': request.form.get('report_pdf_format', 'standard')
     }, merge=True)
     return redirect(url_for('manage_users'))
+
+@app.route('/add_fast_unified', methods=['POST'])
+def add_fast_unified():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    firm_id = session['firm_id']
+    date_val, time_val, mode = request.form['date'], request.form['time'], request.form['payment_mode']
+    
+    natures = request.form.getlist('txn_nature[]')
+    accounts = request.form.getlist('primary_account[]')
+    approvers = request.form.getlist('approved_by_select[]')
+    cats = request.form.getlist('category[]')
+    descs = request.form.getlist('description[]')
+    amts = request.form.getlist('amount[]')
+    
+    existing_cats = get_categories(firm_id)
+    batch = db.batch()
+    
+    for i in range(len(descs)):
+        if amts[i].strip() and float(amts[i]) >= 0:
+            amt, desc = float(amts[i]), descs[i].strip()
+            cat = cats[i]
+            if cat not in existing_cats:
+                db.collection('categories').add({'firm_id': firm_id, 'name': cat})
+                existing_cats.append(cat)
+                
+            txn_nature = natures[i]
+            account_raw = accounts[i]
+            approver = approvers[i]
+            txn_status = 'approved' if approver else 'pending'
+            
+            account_type = 'main'
+            primary_id = None
+            person_name = ''
+            
+            if account_raw.startswith('person_'):
+                primary_id = account_raw.split('_')[1]
+                account_type = 'person'
+                person_name = db.collection('persons').document(primary_id).get().to_dict().get('name', '')
+            elif account_raw.startswith('dasti_'):
+                primary_id = account_raw.split('_')[1]
+                account_type = 'dasti'
+                person_name = db.collection('dasti_persons').document(primary_id).get().to_dict().get('name', '')
+                
+            link_id = uuid.uuid4().hex[:12]
+            final_nature = txn_nature
+            if account_type == 'main':
+                final_nature = 'direct_in' if txn_nature == 'receive_cash' else 'direct_out'
+                
+            base_txn = {
+                'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode, 
+                'category': cat, 'amount': amt, 'link_id': link_id, 'status': txn_status, 
+                'approved_by': approver, 'deleted': 0, 'created_at': time.time(),
+                'voucher_nature': final_nature, 'is_flagged': 0 
+            }
+
+            if account_type == 'main':
+                db_type = 'income' if txn_nature == 'receive_cash' else 'expense'
+                batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': db_type})
+                
+            elif account_type == 'person':
+                if txn_nature == 'slip_in':
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Slip ({person_name}): {desc}", 'type': 'batch_ledger_out'})
+                elif txn_nature == 'advance':
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'advance'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Transfer Out ({person_name}): {desc}", 'type': 'dasti_out'})
+                elif txn_nature == 'receive_cash':
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Transfer In ({person_name}): {desc}", 'type': 'income', 'voucher_nature': 'receive_cash'})
+                    
+            elif account_type == 'dasti':
+                if txn_nature == 'slip_in':
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti Slip ({person_name}): {desc}", 'type': 'batch_ledger_out'})
+                elif txn_nature == 'advance':
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'advance'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti Out ({person_name}): {desc}", 'type': 'dasti_voucher_out'})
+                elif txn_nature == 'receive_cash':
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti In ({person_name}): {desc}", 'type': 'dasti_voucher_in', 'voucher_nature': 'receive_cash'})
+
+    batch.commit()
+    return redirect(request.referrer or url_for('index'))
 
 @app.route('/add_batch_unified', methods=['POST'])
 def add_batch_unified():
@@ -1523,7 +1696,8 @@ def add_batch_unified():
     for i in range(len(descs)):
         if amts[i].strip() and float(amts[i]) >= 0:
             amt, desc = float(amts[i]), descs[i].strip()
-            cat = cust_cats[i].strip() if cats[i] == 'Other' and cust_cats[i].strip() else cats[i]
+            custom_cat_val = cust_cats[i].strip() if i < len(cust_cats) and cust_cats[i] else ''
+            cat = custom_cat_val if cats[i] == 'Other' and custom_cat_val else cats[i]
             if cat not in existing_cats:
                 db.collection('categories').add({'firm_id': firm_id, 'name': cat})
                 existing_cats.append(cat)
@@ -1583,8 +1757,9 @@ def flag_entries():
     
     results = []
     has_searched = False
-    start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-    end_date = datetime.now().strftime('%Y-%m-%d')
+    now = datetime.now(IST)
+    start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d')
+    end_date = now.strftime('%Y-%m-%d')
     flag_filter = 'unflagged'
     
     if request.method == 'POST':
@@ -1620,6 +1795,68 @@ def flag_entries():
             return redirect(url_for('flag_entries'))
             
     return render_template_string(FLAGS_TEMPLATE, results=results, has_searched=has_searched, start_date=start_date, end_date=end_date, flag_filter=flag_filter, username=session['username'], active_page='flags')
+
+@app.route('/bulk_edit_date', methods=['GET', 'POST'])
+def bulk_edit_date():
+    if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): 
+        return redirect(url_for('index'))
+    
+    firm_id = session['firm_id']
+    results = []
+    has_searched = False
+    
+    now = datetime.now(IST)
+    start_date = (now - timedelta(days=7)).strftime('%Y-%m-%d')
+    end_date = now.strftime('%Y-%m-%d')
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'search':
+            start_date = request.form.get('start_date', start_date)
+            end_date = request.form.get('end_date', end_date)
+            
+            docs = db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()
+            for d in docs:
+                data = d.to_dict()
+                date_val = data.get('date', '')
+                if start_date <= date_val <= end_date:
+                    results.append(data)
+                    
+            results.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
+            has_searched = True
+            
+        elif action == 'update_dates':
+            selected_links = request.form.getlist('selected_links')
+            new_date = request.form.get('new_date')
+            
+            if selected_links and new_date:
+                batch = db.batch()
+                updated_count = 0
+                
+                for link_id in selected_links:
+                    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+                        docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', firm_id).stream()
+                        for d in docs:
+                            batch.update(d.reference, {'date': new_date})
+                            updated_count += 1
+                            
+                if updated_count > 0:
+                    batch.set(db.collection('edit_logs').document(), {
+                        'firm_id': firm_id,
+                        'link_id': 'bulk_edit',
+                        'edited_by': session['username'],
+                        'changes': f"Bulk changed date to {new_date} for {len(selected_links)} distinct vouchers.",
+                        'details': "Bulk Date Correction Tool",
+                        'timestamp': int(time.time() * 1000),
+                        'date_formatted': datetime.now(IST).strftime('%d-%b-%Y %I:%M %p')
+                    })
+                    
+                batch.commit()
+            
+            return redirect(url_for('bulk_edit_date'))
+
+    return render_template_string(BULK_EDIT_DATE_TEMPLATE, results=results, has_searched=has_searched, start_date=start_date, end_date=end_date, username=session['username'], active_page='bulk_date')
 
 @app.route('/delete/<string:table_name>/<string:row_id>')
 def delete_entry(table_name, row_id):
@@ -2001,7 +2238,7 @@ def approvals():
     
     approvers = get_approvers(firm_id)
     
-    return render_template_string(APPROVALS_TEMPLATE, pending=pending, approved=approved, approver_names=approvers, username=session['username'], active_page='approvals')
+    return render_template_string(APPROVALS_TEMPLATE, pending=pending, approved=approved, approvers=[{'username': a, 'can_approve': 1} for a in approvers], username=session['username'], active_page='approvals')
 
 @app.route('/approve_voucher/<string:link_id>')
 def approve_voucher(link_id):
@@ -2149,7 +2386,6 @@ def edit_entry(table_name, row_id):
 
         batch = db.batch()
         
-        # --- Audit Logging Configuration ---
         changes = []
         if float(doc_data.get('amount', 0)) != amount: changes.append(f"Amt: ₹{doc_data.get('amount')} ➔ ₹{amount}")
         if doc_data.get('description', '') != desc: changes.append(f"Desc: {doc_data.get('description')} ➔ {desc}")
@@ -2157,6 +2393,8 @@ def edit_entry(table_name, row_id):
         if doc_data.get('payment_mode', '') != mode: changes.append(f"Mode: {doc_data.get('payment_mode')} ➔ {mode}")
         if doc_data.get('date', '') != date_val: changes.append(f"Date: {doc_data.get('date')} ➔ {date_val}")
         
+        # Resolve logging ledger detail BEFORE making changes to account mapping
+        ledger_context_label = "Main Cash Book"
         if has_link:
             new_account_raw = request.form.get('primary_account', 'main')
             new_account_name = request.form.get('new_account_name', '').strip()
@@ -2170,23 +2408,27 @@ def edit_entry(table_name, row_id):
                 ref = db.collection('dasti_persons').document()
                 ref.set({'user_id': firm_id, 'name': new_account_name, 'deleted': 0})
                 new_primary_id, new_account_type, new_person_name = ref.id, 'dasti', new_account_name
+                ledger_context_label = f"Dasti Ledger: {new_person_name}"
             elif new_account_raw == 'new_person':
                 ref = db.collection('persons').document()
                 ref.set({'user_id': firm_id, 'name': new_account_name, 'deleted': 0})
                 new_primary_id, new_account_type, new_person_name = ref.id, 'person', new_account_name
+                ledger_context_label = f"Person Ledger: {new_person_name}"
             elif new_account_raw.startswith('person_'):
                 new_primary_id = new_account_raw.split('_', 1)[1]
                 new_account_type = 'person'
                 pd = db.collection('persons').document(new_primary_id).get().to_dict()
                 new_person_name = pd.get('name', '') if pd else ''
+                ledger_context_label = f"Person Ledger: {new_person_name}"
             elif new_account_raw.startswith('dasti_'):
                 new_primary_id = new_account_raw.split('_', 1)[1]
                 new_account_type = 'dasti'
                 dd = db.collection('dasti_persons').document(new_primary_id).get().to_dict()
                 new_person_name = dd.get('name', '') if dd else ''
+                ledger_context_label = f"Dasti Ledger: {new_person_name}"
 
             if current_account_type != new_account_type:
-                 changes.append(f"Ledger: {current_account_type} ➔ {new_account_type}")
+                 changes.append(f"Ledger Mode: {current_account_type} ➔ {new_account_type}")
 
             final_voucher_nature = new_nature
             if new_account_type == 'main':
@@ -2237,16 +2479,17 @@ def edit_entry(table_name, row_id):
             }
             batch.update(doc_ref, update_data)
 
-        # WRITE LOG IF CHANGES WERE MADE
+        # Enhanced Edit Log Context
         if changes:
+            log_detail = f"Ledger Base: {ledger_context_label} | Desc: {desc}"
             batch.set(db.collection('edit_logs').document(), {
                 'firm_id': firm_id,
                 'link_id': link_id,
                 'edited_by': session['username'],
                 'changes': " | ".join(changes),
-                'details': f"Voucher: {new_nature if has_link else request.form.get('type', entry.get('type'))} | Desc: {desc}",
+                'details': log_detail,
                 'timestamp': int(time.time() * 1000),
-                'date_formatted': datetime.now().strftime('%d-%b-%Y %I:%M %p')
+                'date_formatted': datetime.now(IST).strftime('%d-%b-%Y %I:%M %p')
             })
 
         batch.commit()
@@ -2329,7 +2572,7 @@ def register():
         
         opening_balance = float(request.form.get('opening_balance', 0))
         if opening_balance > 0:
-            now = datetime.now()
+            now = datetime.now(IST)
             db.collection('transactions').add({
                 'user_id': user_id,
                 'date': now.strftime('%Y-%m-%d'),
@@ -2370,5 +2613,6 @@ def bulk_delete():
     batch.commit()
     return redirect(request.referrer or url_for('index'))
 
+ 
 if __name__ == '__main__':
     pass

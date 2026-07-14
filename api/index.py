@@ -50,7 +50,8 @@ def get_global_settings():
         'receipt_display_mode': 'strict',
         'edit_action_mode': 'button',
         'report_flag_mode': 'both',
-        'report_pdf_format': 'standard'
+        'report_pdf_format': 'standard',
+        'dashboard_sort_order': 'desc'
     }
 
 # --- KILL SWITCH INTERCEPTOR ---
@@ -242,14 +243,44 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print">
     }
 </script>'''
 
-LOGS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Logs</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">📝 Edit Logs</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Edited By</th><th>Changes Made</th><th>Voucher Context</th></tr>{% for log in logs %}<tr><td style="padding-left: 20px;"><span style="font-weight: 500;">{{ log.date_formatted }}</span></td><td><span class="badge badge-mode">{{ log.edited_by }}</span></td><td style="color: var(--danger); font-weight: 500; font-size:0.9em;">{{ log.changes }}</td><td style="font-size: 0.85em; color: #4b5563;">{{ log.details }}</td></tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No edit logs found.</td></tr>{% endfor %}</table></div></div></body></html>'''
+LOGS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Logs</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="padding: 0;"><div style="padding: 15px 20px; background: #f8fafc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;"><h3 style="margin: 0; font-size: 1.2em;">📝 Edit Logs {% if link_id_filter %}<span style="color:var(--primary);">(Filtered by Voucher)</span> <a href="/logs" class="btn btn-sm btn-outline" style="margin-left:10px;">❌ Clear Filter</a>{% endif %}</h3></div><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Edited By</th><th>Changes Made</th><th>Voucher Context</th><th style="text-align: center;">Action</th></tr>{% for log in logs %}<tr><td style="padding-left: 20px;"><span style="font-weight: 500;">{{ log.date_formatted }}</span></td><td><span class="badge badge-mode">{{ log.edited_by }}</span></td><td style="color: var(--danger); font-weight: 500; font-size:0.9em;">{{ log.changes }}</td><td style="font-size: 0.85em; color: #4b5563;">{{ log.details }}</td><td style="text-align: center;">{% if log.link_id and log.link_id != 'bulk_edit' %}<div style="display:flex; gap:5px; justify-content:center;"><a href="/edit_by_link/{{ log.link_id }}" class="btn btn-sm" style="background:#f59e0b;color:white;" title="Edit Voucher">✏️ Edit</a><a href="/logs?link_id={{ log.link_id }}" class="btn btn-sm btn-outline" title="Show only this voucher's history">🔍 History</a></div>{% else %}<span style="color:#9ca3af; font-size: 0.8em;">N/A</span>{% endif %}{% if session.get('can_delete_logs') == 1 or session.get('role') == 'superadmin' %}<div style="margin-top:5px;"><a href="/delete_log/{{ log.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Delete this log entry forever?');">🗑️ Delete Log</a></div>{% endif %}</td></tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No edit logs found.</td></tr>{% endfor %}</table></div></div></body></html>'''
+
 FLAGS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Flag Entries</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card"><h3 style="margin-top: 0; color: var(--primary);">🚩 Search & Flag/Unflag Entries</h3><form action="/flag_entries" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;"><input type="hidden" name="action" value="search"><div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}" required></div><div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" value="{{ end_date }}" required></div><div class="form-group flex-1" style="min-width: 200px;"><label>Filter by Flag Status</label><select name="flag_filter" required><option value="unflagged" {% if flag_filter == 'unflagged' %}selected{% endif %}>Unflagged Entries Only</option><option value="flagged" {% if flag_filter == 'flagged' %}selected{% endif %}>Flagged Entries Only 🚩</option><option value="all" {% if flag_filter == 'all' %}selected{% endif %}>All Entries</option></select></div><button class="btn" style="background:indigo; height: 45px; padding: 10px 25px;" type="submit">🔍 Search Entries</button></form></div>{% if has_searched %}<div class="card" style="padding: 0;"><form action="/flag_entries" method="POST" onsubmit="return confirm('Process Flags for selected entries?');"><input type="hidden" name="action" value="process_flags"><div style="padding: 15px 20px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: center;"><button type="submit" name="flag_action" value="1" class="btn btn-sm" style="background:orange; color:white;">🚩 Mark Selected as Flagged</button><button type="submit" name="flag_action" value="0" class="btn btn-sm" style="background:slategray; color:white;">🏳️ Remove Flag from Selected</button></div><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th><th>Date & Time</th><th>Category / Detail</th><th style="text-align: right;">Amount</th></tr>{% for t in results %}<tr><td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td><td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td><td><span class="badge badge-mode">{{ t.category }}</span> {% if t.is_flagged == 1 %}<span style="color:orange;">🚩</span>{% endif %}<br><span style="white-space: pre-wrap;">{{ t.description }}</span></td><td style="text-align: right;">{% if t.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'advance'] %}<span style="color:red; font-weight:bold;">- ₹{{ "{:,.2f}".format(t.amount) }}</span>{% else %}<span style="color:green; font-weight:bold;">+ ₹{{ "{:,.2f}".format(t.amount) }}</span>{% endif %}</td></tr>{% else %}<tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No entries found.</td></tr>{% endfor %}</table></form></div>{% endif %}</div></body></html>'''
 
 LOGIN_TEMPLATE = '''<!DOCTYPE html><html><head><title>System Gateway</title><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet"><style>body { background-color: #111; color: #0f0; font-family: monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; flex-direction: column; transition: background 0.5s ease; touch-action: none; }.hud { display: flex; justify-content: space-between; align-items: center; width: 400px; max-width: 95vw; margin-bottom: 10px; font-size: 1.2em; font-weight: bold; }canvas { border: 2px solid #333; background-color: #000; box-shadow: 0 0 15px rgba(0, 255, 0, 0.2); max-width: 95vw; max-height: 50vh; }#login-container { display: none; position: absolute; z-index: 10; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); font-family: 'Poppins', sans-serif; color: #333; width: 350px; max-width: 90vw; }h2 { color: #4f46e5; margin-top: 0; text-align: center; }.form-group { margin-bottom: 15px; display: flex; flex-direction: column; }label { font-weight: 600; margin-bottom: 5px; font-size: 0.85em; color: #4b5563; }input { padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1em; }button { background: #4f46e5; color: white; border: none; padding: 10px; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 10px; width: 100%; font-size: 1em;}button:hover { background: #4338ca; }.controls { display: none; grid-template-columns: 60px 60px 60px; grid-template-rows: 60px 60px; gap: 10px; margin-top: 20px; justify-content: center; }.btn-ctrl { background: rgba(0, 255, 0, 0.2); border: 2px solid #0f0; color: #0f0; border-radius: 8px; font-size: 1.5em; display: flex; justify-content: center; align-items: center; user-select: none; }.btn-ctrl:active { background: rgba(0, 255, 0, 0.5); }.btn-up { grid-column: 2; grid-row: 1; }.btn-left { grid-column: 1; grid-row: 2; }.btn-down { grid-column: 2; grid-row: 2; }.btn-right { grid-column: 3; grid-row: 2; }@media (max-width: 768px) { .controls { display: grid; } }#game-over-msg { display: none; color: red; text-align: center; margin-top: 20px; font-size: 1.2em; font-family: 'Poppins', sans-serif; font-weight: bold; }{% if settings.game_enabled == 0 and not is_demo %}#game-wrapper { display: none !important; } #login-container { display: block !important; position: static; margin: auto; }body { background-color: #f8fafc; }{% endif %}</style></head><body><div id="game-wrapper"><div class="hud"><div id="timeDisplay">Time: 0s</div><div id="scoreDisplay">Score: 0 / {{ settings.blocks_to_eat }}</div></div><canvas id="gameCanvas" width="400" height="400"></canvas><div id="game-over-msg">Game Over.<br>Refresh page to restart.</div><div class="controls"><div class="btn-ctrl btn-up" id="btnUp">▲</div><div class="btn-ctrl btn-left" id="btnLeft">◀</div><div class="btn-ctrl btn-down" id="btnDown">▼</div><div class="btn-ctrl btn-right" id="btnRight">▶</div></div></div><div id="login-container"><h2>System Access</h2><form action="/login" method="POST"><div class="form-group"><label>Username</label><input type="text" name="username" required></div><div class="form-group"><label>Password</label><input type="password" name="password" required></div><button type="submit">Secure Login</button></form></div><script>{% if settings.game_enabled != 0 or is_demo %}const canvas = document.getElementById('gameCanvas');const ctx = canvas.getContext('2d');const grid = 20; let speedMod = parseInt("{{ settings.game_speed }}") || 0; let delayMs = 100 - (speedMod * 10); if (delayMs < 20) delayMs = 20; if (delayMs > 500) delayMs = 500; let gameTimer; let snake = { x: 160, y: 160, dx: grid, dy: 0, cells: [], maxCells: 4 }; let apple = { x: 320, y: 320 }; let score = 0; let targetScore = parseInt("{{ settings.blocks_to_eat }}") || 4; let startTime = Math.floor(Date.now() / 1000); let isGameOver = false; let loginUnlocked = false; let targetX = 0, targetY = 0; const targetCorner = "{{ settings.unlock_corner }}"; if(targetCorner === 'br') { targetX = canvas.width - grid; targetY = canvas.height - grid; } else if(targetCorner === 'bl') { targetX = 0; targetY = canvas.height - grid; } else if(targetCorner === 'tr') { targetX = canvas.width - grid; targetY = 0; } else if(targetCorner === 'tl') { targetX = 0; targetY = 0; } function getRandomInt(min, max) { return Math.floor(Math.random() * (max - min)) + min; } function triggerGameOver() { isGameOver = true; clearTimeout(gameTimer); document.getElementById('game-over-msg').style.display = 'block'; } function loop() { if (isGameOver) return; gameTimer = setTimeout(loop, delayMs); ctx.clearRect(0, 0, canvas.width, canvas.height); document.getElementById('timeDisplay').innerText = 'Time: ' + (Math.floor(Date.now() / 1000) - startTime) + 's'; snake.x += snake.dx; snake.y += snake.dy; if (snake.x < 0) { snake.x = canvas.width - grid; } else if (snake.x >= canvas.width) { snake.x = 0; } if (snake.y < 0) { snake.y = canvas.height - grid; } else if (snake.y >= canvas.height) { snake.y = 0; } snake.cells.unshift({ x: snake.x, y: snake.y }); if (snake.cells.length > snake.maxCells) snake.cells.pop(); ctx.fillStyle = 'red'; ctx.fillRect(apple.x, apple.y, grid - 1, grid - 1); ctx.fillStyle = '#0f0'; snake.cells.forEach(function(cell, index) { ctx.fillRect(cell.x, cell.y, grid - 1, grid - 1); if (cell.x === apple.x && cell.y === apple.y) { snake.maxCells++; score++; document.getElementById('scoreDisplay').innerText = 'Score: ' + score + ' / ' + targetScore; if (score >= targetScore) { loginUnlocked = true; } apple.x = getRandomInt(0, 20) * grid; apple.y = getRandomInt(0, 20) * grid; } for (let i = index + 1; i < snake.cells.length; i++) { if (cell.x === snake.cells[i].x && cell.y === snake.cells[i].y) { triggerGameOver(); return; } } }); if (snake.x === targetX && snake.y === targetY) { if (loginUnlocked) { isGameOver = true; clearTimeout(gameTimer); document.getElementById('game-wrapper').style.display = 'none'; document.getElementById('login-container').style.display = 'block'; document.body.style.background = '#f8fafc'; } } } function setDir(dx, dy) { if(isGameOver) return; if (dx !== 0 && snake.dx === 0) { snake.dx = dx; snake.dy = dy; } else if (dy !== 0 && snake.dy === 0) { snake.dy = dy; snake.dx = dx; } } document.addEventListener('keydown', function(e) { if (e.which === 37) setDir(-grid, 0); else if (e.which === 38) setDir(0, -grid); else if (e.which === 39) setDir(grid, 0); else if (e.which === 40) setDir(0, grid); }); document.getElementById('btnUp').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, -grid); }, {passive: false}); document.getElementById('btnDown').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(0, grid); }, {passive: false}); document.getElementById('btnLeft').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(-grid, 0); }, {passive: false}); document.getElementById('btnRight').addEventListener('touchstart', (e) => { e.preventDefault(); setDir(grid, 0); }, {passive: false}); document.getElementById('btnUp').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(0, -grid); }); document.getElementById('btnDown').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(0, grid); }); document.getElementById('btnLeft').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(-grid, 0); }); document.getElementById('btnRight').addEventListener('mousedown', (e) => { e.preventDefault(); setDir(grid, 0); }); loop(); {% endif %}</script></body></html>'''
 
-USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''{% if session.get('role') == 'superadmin' %}<div class="card" style="margin-bottom: 20px; padding: 20px; background: #e0f2fe; border: 1px solid #38bdf8;"><h3 style="font-size: 1.2em; color: #0369a1; margin-top: 0;">🎮 Global Configuration & App Settings</h3><form action="/update_settings" method="POST" style="display:flex; gap:15px; align-items: flex-end; flex-wrap:wrap;"><div class="form-group flex-1" style="min-width: 150px;"><label style="color:var(--danger);">🔴 App Lockdown (Kill Switch)</label><select name="app_disabled" required style="border-color:var(--danger); font-weight:bold;"><option value="0" {% if sys_settings.app_disabled == False %}selected{% endif %}>🟢 Active (Normal)</option><option value="1" {% if sys_settings.app_disabled == True %}selected{% endif %}>🔴 DISABLED (Lockdown)</option></select></div><div class="form-group flex-1" style="min-width: 150px;"><label>Game Gateway?</label><select name="game_enabled" required style="border-color:#7dd3fc;"><option value="1" {% if sys_settings.game_enabled == 1 %}selected{% endif %}>✅ Enabled</option><option value="0" {% if sys_settings.game_enabled == 0 %}selected{% endif %}>❌ Disabled</option></select></div><div class="form-group flex-1"><label>Blocks to Unlock</label><input type="number" name="blocks_to_eat" value="{{ sys_settings.blocks_to_eat }}" min="1" max="20" required></div><div class="form-group flex-1"><label>Game Speed</label><input type="number" name="game_speed" value="{{ sys_settings.game_speed }}" min="-20" max="10" required></div><div class="form-group flex-1" style="min-width: 200px;"><label>Require Delete Confirm</label><select name="require_delete_confirm" required><option value="1" {% if sys_settings.require_delete_confirm %}selected{% endif %}>Yes (Safe)</option><option value="0" {% if not sys_settings.require_delete_confirm %}selected{% endif %}>No</option></select></div><div class="form-group flex-1" style="min-width: 200px;"><label>Balance Display Mode</label><select name="balance_display_mode" required><option value="both" {% if sys_settings.balance_display_mode == 'both' %}selected{% endif %}>Show Both Ledgers</option><option value="person_only" {% if sys_settings.balance_display_mode == 'person_only' %}selected{% endif %}>Person Only</option><option value="dasti_only" {% if sys_settings.balance_display_mode == 'dasti_only' %}selected{% endif %}>Dasti Only</option><option value="none" {% if sys_settings.balance_display_mode == 'none' %}selected{% endif %}>Hide All</option></select></div><div class="form-group flex-1" style="min-width: 200px;"><label>Receipt Screen Mode</label><select name="receipt_display_mode" required><option value="strict" {% if sys_settings.receipt_display_mode == 'strict' %}selected{% endif %}>Pure Receipts Only</option><option value="all_positive" {% if sys_settings.receipt_display_mode == 'all_positive' %}selected{% endif %}>Show All Cash In (+)</option></select></div><div class="form-group flex-1" style="min-width: 200px;"><label>Edit Action Mode</label><select name="edit_action_mode" required><option value="button" {% if sys_settings.edit_action_mode == 'button' %}selected{% endif %}>Visible Button</option><option value="tap" {% if sys_settings.edit_action_mode == 'tap' %}selected{% endif %}>Direct Tap</option></select></div><div class="form-group flex-1" style="min-width: 200px;"><label>Report Flag Filter</label><select name="report_flag_mode" required><option value="both" {% if sys_settings.report_flag_mode == 'both' %}selected{% endif %}>Show All Entries</option><option value="flagged" {% if sys_settings.report_flag_mode == 'flagged' %}selected{% endif %}>Flagged Only</option><option value="unflagged" {% if sys_settings.report_flag_mode == 'unflagged' %}selected{% endif %}>Unflagged Only</option></select></div><div class="form-group flex-1" style="min-width: 200px;"><label>Report PDF Format</label><select name="report_pdf_format" required><option value="standard" {% if sys_settings.report_pdf_format == 'standard' %}selected{% endif %}>Standard Detail</option><option value="summary_breakdown" {% if sys_settings.report_pdf_format == 'summary_breakdown' %}selected{% endif %}>Summary Breakdown</option></select></div><button class="btn" type="submit" style="padding: 10px 25px; height: 45px; background:#0284c7; width: 100%;">💾 Save Global Settings</button></form></div>{% endif %}<div class="card" style="margin-bottom: 20px; padding: 20px;"><h3 style="font-size: 1.2em;">👤 Create New Firm User</h3><form action="/add_user" method="POST" style="display:flex; gap:15px; align-items: flex-end; flex-wrap:wrap;"><div class="form-group flex-1"><label>Username</label><input type="text" name="new_username" required></div><div class="form-group flex-1"><label>Password</label><input type="password" name="new_password" required></div><div class="form-group flex-1"><label>Role</label><select name="role" required><option value="admin">Admin</option><option value="superadmin">Superadmin</option><option value="cashier">Cashier</option><option value="market">Market</option></select></div><div class="form-group flex-1"><label>Idle Auto-Logout (Mins)</label><input type="number" name="idle_timeout" value="15" min="1" required></div><div class="form-group" style="padding-bottom: 10px; display: flex; flex-direction: column; gap: 5px;"><label><input type="checkbox" name="can_approve" value="1"> Grant Apprv</label><label><input type="checkbox" name="can_edit" value="1"> Grant Edit/Del</label><label><input type="checkbox" name="can_express_cashout" value="1"> Grant Exp Cash-Out</label></div><div class="form-group" style="padding-bottom: 10px; display: flex; flex-direction: column; gap: 5px;"><label><input type="checkbox" name="can_view_reports" value="1"> Grant Reports</label><label><input type="checkbox" name="can_view_trash" value="1"> Grant Trash</label></div><button class="btn-success" type="submit" style="padding: 10px 25px; height: 45px;">Create User</button></form></div><div class="card" style="padding: 0; margin-bottom: 20px;"><h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">🛡️ Registered Firm Users</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Username</th><th>Role</th><th>Rights</th><th style="text-align:center;">Action</th></tr>{% for u in users %}<tr><td style="padding-left: 20px; font-weight: 500;">{{ u.username }}</td><td><span class="badge badge-mode">{{ u.role|title }}</span></td><td style="font-size: 0.85em;">Apprv: {% if u.can_approve %}✅{% else %}❌{% endif %} | Edit: {% if u.can_edit %}✅{% else %}❌{% endif %} | Rep: {% if u.can_view_reports %}✅{% else %}❌{% endif %} | Trash: {% if u.can_view_trash %}✅{% else %}❌{% endif %} | ExpOut: {% if u.can_express_cashout %}✅{% else %}❌{% endif %}</td><td style="text-align: center;"><a href="/edit_user/{{ u.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️ Edit User</a></td></tr>{% endfor %}</table></div><div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">✔️ Manage Custom Approvers</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Approver Name</th><th style="text-align:center;">Action</th></tr>{% for a in approver_list %}<tr><td style="padding-left: 20px; font-weight: 500;"><span id="appr-span-{{a.id}}">{{ a.name }}</span><form id="appr-form-{{a.id}}" action="/edit_approver/{{ a.id }}" method="POST" style="display:none; gap:10px; align-items:center; margin:0;"><input type="text" name="name" value="{{ a.name }}" required style="max-width: 200px; padding: 5px;"><button type="submit" class="btn btn-sm btn-success">Save</button></form></td><td style="text-align: center;"><button class="btn btn-sm btn-warning" onclick="document.getElementById('appr-span-{{a.id}}').style.display='none'; document.getElementById('appr-form-{{a.id}}').style.display='flex'; this.style.display='none';">✏️ Edit</button> <a href="/delete_approver/{{ a.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Delete this custom approver name?');">🗑️</a></td></tr>{% else %}<tr><td colspan="2" style="text-align:center; padding:30px; color:#9ca3af;">No custom approvers added yet.</td></tr>{% endfor %}</table></div></div></body></html>'''
+USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''{% if session.get('role') == 'superadmin' %}
+<div class="card" style="margin-bottom: 20px; padding: 20px; background: #e0f2fe; border: 1px solid #38bdf8;">
+    <h3 style="font-size: 1.2em; color: #0369a1; margin-top: 0;">🎮 Global Configuration & App Settings</h3>
+    <form action="/update_settings" method="POST" style="display:flex; gap:15px; align-items: flex-end; flex-wrap:wrap;">
+        <div class="form-group flex-1" style="min-width: 150px;"><label style="color:var(--danger);">🔴 App Lockdown (Kill Switch)</label><select name="app_disabled" required style="border-color:var(--danger); font-weight:bold;"><option value="0" {% if sys_settings.app_disabled == False %}selected{% endif %}>🟢 Active (Normal)</option><option value="1" {% if sys_settings.app_disabled == True %}selected{% endif %}>🔴 DISABLED (Lockdown)</option></select></div>
+        <div class="form-group flex-1" style="min-width: 150px;"><label>Game Gateway?</label><select name="game_enabled" required style="border-color:#7dd3fc;"><option value="1" {% if sys_settings.game_enabled == 1 %}selected{% endif %}>✅ Enabled</option><option value="0" {% if sys_settings.game_enabled == 0 %}selected{% endif %}>❌ Disabled</option></select></div>
+        <div class="form-group flex-1"><label>Blocks to Unlock</label><input type="number" name="blocks_to_eat" value="{{ sys_settings.blocks_to_eat }}" min="1" max="20" required></div>
+        <div class="form-group flex-1"><label>Game Speed</label><input type="number" name="game_speed" value="{{ sys_settings.game_speed }}" min="-20" max="10" required></div>
+        
+        <div class="form-group flex-1" style="min-width: 200px;"><label>Balance Display Mode</label><select name="balance_display_mode" required><option value="both" {% if sys_settings.balance_display_mode == 'both' %}selected{% endif %}>Show Both Ledgers</option><option value="person_only" {% if sys_settings.balance_display_mode == 'person_only' %}selected{% endif %}>Person Only</option><option value="dasti_only" {% if sys_settings.balance_display_mode == 'dasti_only' %}selected{% endif %}>Dasti Only</option><option value="none" {% if sys_settings.balance_display_mode == 'none' %}selected{% endif %}>Hide All</option></select></div>
+        <div class="form-group flex-1" style="min-width: 200px;"><label>Receipt Screen Mode</label><select name="receipt_display_mode" required><option value="strict" {% if sys_settings.receipt_display_mode == 'strict' %}selected{% endif %}>Pure Receipts Only</option><option value="all_positive" {% if sys_settings.receipt_display_mode == 'all_positive' %}selected{% endif %}>Show All Cash In (+)</option></select></div>
+        <div class="form-group flex-1" style="min-width: 200px;"><label>Edit Action Mode</label><select name="edit_action_mode" required><option value="button" {% if sys_settings.edit_action_mode == 'button' %}selected{% endif %}>Visible Button</option><option value="tap" {% if sys_settings.edit_action_mode == 'tap' %}selected{% endif %}>Direct Tap</option></select></div>
+        <div class="form-group flex-1" style="min-width: 200px;"><label>Report Flag Filter</label><select name="report_flag_mode" required><option value="both" {% if sys_settings.report_flag_mode == 'both' %}selected{% endif %}>Show All Entries</option><option value="flagged" {% if sys_settings.report_flag_mode == 'flagged' %}selected{% endif %}>Flagged Only</option><option value="unflagged" {% if sys_settings.report_flag_mode == 'unflagged' %}selected{% endif %}>Unflagged Only</option></select></div>
+        <div class="form-group flex-1" style="min-width: 200px;"><label>Report PDF Format</label><select name="report_pdf_format" required><option value="standard" {% if sys_settings.report_pdf_format == 'standard' %}selected{% endif %}>Standard Detail</option><option value="summary_breakdown" {% if sys_settings.report_pdf_format == 'summary_breakdown' %}selected{% endif %}>Summary Breakdown</option></select></div>
+        <div class="form-group flex-1" style="min-width: 200px;"><label>Dashboard Ledger Sort</label><select name="dashboard_sort_order" required style="border-color:#38bdf8; font-weight:bold;"><option value="desc" {% if sys_settings.dashboard_sort_order == 'desc' %}selected{% endif %}>Newest First (Desc) ⬇️</option><option value="asc" {% if sys_settings.dashboard_sort_order == 'asc' %}selected{% endif %}>Oldest First (Asc) ⬆️</option></select></div>
+        
+        <button class="btn" type="submit" style="padding: 10px 25px; height: 45px; background:#0284c7; width: 100%;">💾 Save Global Settings</button>
+    </form>
+</div>
 
-EDIT_USER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit User</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="max-width: 500px; margin: 0 auto;"><h2 style="color: var(--primary); margin-bottom: 20px;">⚙️ Edit User Profile</h2><form action="/edit_user/{{ edit_user.id }}" method="POST"><div class="form-group"><label>Username</label><input type="text" name="username" value="{{ edit_user.username }}" required></div><div class="form-group"><label>New Password <small>(Leave blank to keep current)</small></label><input type="password" name="password"></div><div class="form-group"><label>User Role</label><select name="role" required><option value="superadmin" {% if edit_user.role == 'superadmin' %}selected{% endif %}>Superadmin</option><option value="admin" {% if edit_user.role == 'admin' %}selected{% endif %}>Admin</option><option value="cashier" {% if edit_user.role == 'cashier' %}selected{% endif %}>Cashier</option><option value="market" {% if edit_user.role == 'market' %}selected{% endif %}>Market</option></select></div><div class="form-group"><label>Idle Auto-Logout (Minutes)</label><input type="number" name="idle_timeout" value="{{ edit_user.idle_timeout_minutes | default(15) }}" min="1" required></div><div class="form-group" style="padding-bottom: 15px; margin-top: 10px; display: flex; flex-direction: column; gap: 8px;"><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_approve" value="1" {% if edit_user.can_approve %}checked{% endif %} style="width: auto;"> Grant Voucher Approval Rights</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_edit" value="1" {% if edit_user.can_edit %}checked{% endif %} style="width: auto;"> Grant Edit / Delete Rights</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_express_cashout" value="1" {% if edit_user.can_express_cashout %}checked{% endif %} style="width: auto;"> Grant Express Cash-Out</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_view_reports" value="1" {% if edit_user.can_view_reports %}checked{% endif %} style="width: auto;"> Grant Report Access</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_view_trash" value="1" {% if edit_user.can_view_trash %}checked{% endif %} style="width: auto;"> Grant Trash Bin Access</label></div><div style="display: flex; gap: 15px;"><a href="/manage_users" class="btn btn-outline" style="flex:1;">Cancel</a><button class="btn-success" type="submit" style="flex:1;">Save Updates</button></div></form></div></div></body></html>'''
+<div class="card" style="margin-bottom: 20px; padding: 20px; background: #fdf4ff; border: 1px solid #e879f9;">
+    <h3 style="font-size: 1.2em; color: #a21caf; margin-top: 0;">🗄️ Database Maintenance (Re-Index)</h3>
+    <p style="font-size: 0.9em; color: #701a75; margin-bottom: 15px;">If vouchers are appearing out of order after bulk date edits, use this tool to re-calculate their chronological index based on their assigned Date and Time.</p>
+    <form action="/reindex_database" method="POST" onsubmit="return confirm('This will re-calculate the sorting index for ALL vouchers based on their dates. Proceed?');">
+        <button class="btn" type="submit" style="background:#c026d3; padding: 10px 25px;">🔄 Re-Index All Vouchers by Date & Time</button>
+    </form>
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom: 20px; padding: 20px;"><h3 style="font-size: 1.2em;">👤 Create New Firm User</h3><form action="/add_user" method="POST" style="display:flex; gap:15px; align-items: flex-end; flex-wrap:wrap;"><div class="form-group flex-1"><label>Username</label><input type="text" name="new_username" required></div><div class="form-group flex-1"><label>Password</label><input type="password" name="new_password" required></div><div class="form-group flex-1"><label>Role</label><select name="role" required><option value="admin">Admin</option><option value="superadmin">Superadmin</option><option value="cashier">Cashier</option><option value="market">Market</option></select></div><div class="form-group flex-1"><label>Idle Auto-Logout (Mins)</label><input type="number" name="idle_timeout" value="15" min="1" required></div><div class="form-group" style="padding-bottom: 10px; display: flex; flex-direction: column; gap: 5px;"><label><input type="checkbox" name="can_approve" value="1"> Grant Apprv</label><label><input type="checkbox" name="can_edit" value="1"> Grant Edit/Del</label><label><input type="checkbox" name="can_express_cashout" value="1"> Grant Exp Cash-Out</label></div><div class="form-group" style="padding-bottom: 10px; display: flex; flex-direction: column; gap: 5px;"><label><input type="checkbox" name="can_view_reports" value="1"> Grant Reports</label><label><input type="checkbox" name="can_view_trash" value="1"> Grant Trash</label><label><input type="checkbox" name="can_delete_logs" value="1"> Grant Log Delete</label></div><button class="btn-success" type="submit" style="padding: 10px 25px; height: 45px;">Create User</button></form></div><div class="card" style="padding: 0; margin-bottom: 20px;"><h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">🛡️ Registered Firm Users</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Username</th><th>Role</th><th>Rights</th><th style="text-align:center;">Action</th></tr>{% for u in users %}<tr><td style="padding-left: 20px; font-weight: 500;">{{ u.username }}</td><td><span class="badge badge-mode">{{ u.role|title }}</span></td><td style="font-size: 0.85em;">Apprv: {% if u.can_approve %}✅{% else %}❌{% endif %} | Edit: {% if u.can_edit %}✅{% else %}❌{% endif %} | Rep: {% if u.can_view_reports %}✅{% else %}❌{% endif %} | Trash: {% if u.can_view_trash %}✅{% else %}❌{% endif %} | Del Logs: {% if u.can_delete_logs %}✅{% else %}❌{% endif %}</td><td style="text-align: center;"><a href="/edit_user/{{ u.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️ Edit User</a></td></tr>{% endfor %}</table></div><div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 1.2em;">✔️ Manage Custom Approvers</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Approver Name</th><th style="text-align:center;">Action</th></tr>{% for a in approver_list %}<tr><td style="padding-left: 20px; font-weight: 500;"><span id="appr-span-{{a.id}}">{{ a.name }}</span><form id="appr-form-{{a.id}}" action="/edit_approver/{{ a.id }}" method="POST" style="display:none; gap:10px; align-items:center; margin:0;"><input type="text" name="name" value="{{ a.name }}" required style="max-width: 200px; padding: 5px;"><button type="submit" class="btn btn-sm btn-success">Save</button></form></td><td style="text-align: center;"><button class="btn btn-sm btn-warning" onclick="document.getElementById('appr-span-{{a.id}}').style.display='none'; document.getElementById('appr-form-{{a.id}}').style.display='flex'; this.style.display='none';">✏️ Edit</button> <a href="/delete_approver/{{ a.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Delete this custom approver name?');">🗑️</a></td></tr>{% else %}<tr><td colspan="2" style="text-align:center; padding:30px; color:#9ca3af;">No custom approvers added yet.</td></tr>{% endfor %}</table></div></div></body></html>'''
+
+EDIT_USER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit User</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div class="card" style="max-width: 500px; margin: 0 auto;"><h2 style="color: var(--primary); margin-bottom: 20px;">⚙️ Edit User Profile</h2><form action="/edit_user/{{ edit_user.id }}" method="POST"><div class="form-group"><label>Username</label><input type="text" name="username" value="{{ edit_user.username }}" required></div><div class="form-group"><label>New Password <small>(Leave blank to keep current)</small></label><input type="password" name="password"></div><div class="form-group"><label>User Role</label><select name="role" required><option value="superadmin" {% if edit_user.role == 'superadmin' %}selected{% endif %}>Superadmin</option><option value="admin" {% if edit_user.role == 'admin' %}selected{% endif %}>Admin</option><option value="cashier" {% if edit_user.role == 'cashier' %}selected{% endif %}>Cashier</option><option value="market" {% if edit_user.role == 'market' %}selected{% endif %}>Market</option></select></div><div class="form-group"><label>Idle Auto-Logout (Minutes)</label><input type="number" name="idle_timeout" value="{{ edit_user.idle_timeout_minutes | default(15) }}" min="1" required></div><div class="form-group" style="padding-bottom: 15px; margin-top: 10px; display: flex; flex-direction: column; gap: 8px;"><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_approve" value="1" {% if edit_user.can_approve %}checked{% endif %} style="width: auto;"> Grant Voucher Approval Rights</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_edit" value="1" {% if edit_user.can_edit %}checked{% endif %} style="width: auto;"> Grant Edit / Delete Rights</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_express_cashout" value="1" {% if edit_user.can_express_cashout %}checked{% endif %} style="width: auto;"> Grant Express Cash-Out</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_view_reports" value="1" {% if edit_user.can_view_reports %}checked{% endif %} style="width: auto;"> Grant Report Access</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_view_trash" value="1" {% if edit_user.can_view_trash %}checked{% endif %} style="width: auto;"> Grant Trash Bin Access</label><label style="display:flex; align-items:center; gap:10px; cursor:pointer;"><input type="checkbox" name="can_delete_logs" value="1" {% if edit_user.can_delete_logs %}checked{% endif %} style="width: auto;"> Grant Log Deletion Rights</label></div><div style="display: flex; gap: 15px;"><a href="/manage_users" class="btn btn-outline" style="flex:1;">Cancel</a><button class="btn-success" type="submit" style="flex:1;">Save Updates</button></div></form></div></div></body></html>'''
 
 APPROVALS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Approvals Dashboard</title>''' + BASE_STYLE + '''</head><body><div class="container">''' + NAVBAR_HTML + '''<div style="display:flex; gap: 10px; margin-bottom: 20px;"><button class="btn btn-warning" id="tab-pending-btn" onclick="toggleTab('pending')" style="flex:1;">⏳ Pending Vouchers</button><button class="btn btn-outline" id="tab-approved-btn" onclick="toggleTab('approved')" style="flex:1; background:#fff;">✅ Approved History</button></div><div id="section-pending"><div class="card" style="margin-bottom: 20px;"><h3 style="margin-top: 0; font-size: 1.2em; color: var(--primary);">📅 Bulk Approve by Date Range</h3><form action="/bulk_approve" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;"><div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" required></div><div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" required></div><div class="form-group flex-1" style="min-width: 200px;"><label>Approved By</label><select name="approved_by_select" style="border-color: var(--warning); font-weight:bold;"><option value="">-- Set as Myself ({{ username }}) --</option><optgroup label="✅ Allowed Approvers">{% for u in approvers %}{% if u.can_approve %}<option value="{{ u.username }}">{{ u.username }}</option>{% endif %}{% endfor %}</optgroup></select></div><button class="btn-success" type="submit" style="height: 45px; padding: 10px 25px; font-size: 1.05em;" onclick="return confirm('Approve ALL pending entries in this date range?');">Bulk Approve Range</button></form></div><div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #fef08a; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #92400e;">☑️ Select & Approve Specific Vouchers</h3><form action="/bulk_approve_selected" method="POST" onsubmit="return confirm('Approve selected vouchers?');"><div style="padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 15px; align-items: flex-end; background: #fffbeb;"><div class="form-group" style="margin-bottom: 0; min-width: 200px;"><label style="color:#92400e;">Set Approved By:</label><select name="approved_by_select" style="border-color: var(--warning); font-weight:bold;"><option value="">-- Set as Myself ({{ username }}) --</option><optgroup label="✅ Allowed Approvers">{% for u in approvers %}{% if u.can_approve %}<option value="{{ u.username }}">{{ u.username }}</option>{% endif %}{% endfor %}</optgroup></select></div><button type="submit" class="btn btn-success" style="height: 40px; padding: 0 25px;">✅ Approve Selected Entries</button></div><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:18px; height:18px; cursor:pointer;"></th><th>Date & Time</th><th>Description / Detail</th><th style="text-align: right;">Amount</th><th style="text-align: center;">Action</th></tr>{% for t in pending %}<tr><td style="padding-left: 20px;"><input type="checkbox" name="selected_links" value="{{ t.link_id }}" style="width:18px; height:18px; cursor:pointer;"></td><td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td><td><span class="badge badge-pending">Pending</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td><td style="text-align: right;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td><td style="text-align: center;"><a href="/approve_voucher/{{ t.link_id }}" class="btn btn-sm btn-success" onclick="return confirm('Approve this transaction?');">✅</a> <a href="/reject_voucher/{{ t.link_id }}" class="btn btn-sm btn-danger" onclick="return confirm('Reject & Delete this transaction?');">❌</a></td></tr>{% else %}<tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No pending vouchers requiring approval.</td></tr>{% endfor %}</table></form></div></div><div id="section-approved" style="display: none;"><div class="card" style="padding: 0;"><h3 style="padding: 15px 20px; margin: 0; background: #d1fae5; border-bottom: 1px solid var(--border); font-size: 1.2em; color: #065f46;">✅ Recently Approved Vouchers</h3><table style="width: 100%; border: none;"><tr><th style="padding-left: 20px;">Date & Time</th><th>Description / Detail</th><th style="text-align: right; padding-right:20px;">Amount</th></tr>{% for t in approved %}<tr><td style="padding-left: 20px;"><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td><td><span class="badge badge-in" style="background:#e0f2fe; color:#0369a1;">Approved by: {{ t.approved_by }}</span><br><span style="white-space: pre-wrap;">{{ t.description }}</span></td><td style="text-align: right; padding-right:20px;"><strong>₹{{ "{:,.2f}".format(t.amount) }}</strong></td></tr>{% else %}<tr><td colspan="3" style="text-align:center; color:#9ca3af; padding: 40px;">No recently approved vouchers found.</td></tr>{% endfor %}</table></div></div></div><script>document.addEventListener("DOMContentLoaded", function() { setAutoDateTime(); });function toggleTab(tab) {if(tab === 'pending') {document.getElementById('section-pending').style.display = 'block';document.getElementById('section-approved').style.display = 'none';document.getElementById('tab-pending-btn').className = 'btn btn-warning';document.getElementById('tab-approved-btn').className = 'btn btn-outline';document.getElementById('tab-approved-btn').style.background = '#fff';} else {document.getElementById('section-pending').style.display = 'none';document.getElementById('section-approved').style.display = 'block';document.getElementById('tab-pending-btn').className = 'btn btn-outline';document.getElementById('tab-pending-btn').style.background = '#fff';document.getElementById('tab-approved-btn').className = 'btn btn-success';}}</script></body></html>'''
 
@@ -353,10 +384,15 @@ EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BAS
         <div class="card" style="max-width: 650px; margin: 0 auto;">
             <h2 style="color: var(--primary); margin-bottom: 20px;">✏️ Edit / Correct Transaction</h2>
             <form action="/edit/{{ table_name }}/{{ entry.id }}" method="POST">
-                <div class="flex-row">
-                    <div class="form-group flex-1"><label>Date</label><input type="date" name="date" value="{{ entry.date }}" required></div>
-                    <div class="form-group flex-1"><label>Time</label><input type="time" name="time" value="{{ entry.time }}" required></div>
+                
+                <div class="flex-row" style="align-items: flex-end;">
+                    <div class="form-group flex-1"><label>Date</label><input type="date" name="date" id="edit_date" value="{{ entry.date }}" required></div>
+                    <div class="form-group flex-1"><label>Time</label><input type="time" name="time" id="edit_time" value="{{ entry.time }}" required></div>
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <button type="button" class="btn btn-outline" style="height: 42px; padding: 0 15px;" onclick="setNow()">🕒 Use Current</button>
+                    </div>
                 </div>
+                
                 <div class="flex-row">
                     <div class="form-group flex-1"><label>Mode</label>
                         <select name="payment_mode" required><option value="Cash" {% if entry.payment_mode == 'Cash' %}selected{% endif %}>Cash</option><option value="Online" {% if entry.payment_mode == 'Online' %}selected{% endif %}>Online</option></select>
@@ -411,6 +447,16 @@ EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BAS
                 </div>
             </form>
         </div>
+        
+        <script>
+            function setNow() {
+                const now = new Date();
+                const dateString = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+                const timeString = now.toTimeString().slice(0,5);
+                document.getElementById('edit_date').value = dateString;
+                document.getElementById('edit_time').value = timeString;
+            }
+        </script>
     </div></body></html>'''
 
 INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</title>''' + BASE_STYLE + '''</head><body>
@@ -584,7 +630,57 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
             </div>
         </div>
     </div>
-    
+    <!-- SPLIT SETTLEMENT FORM -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; margin-top: 15px; border-top: 2px dashed var(--border); padding-top: 15px;">
+                <h3 style="margin:0; font-size: 1.3em; color: var(--primary);">🔀 Split Voucher / Settle Multiple Accounts</h3>
+                <button class="btn" style="background: #0ea5e9;" onclick="toggleSplitMode()">➕ Open Split Settlement</button>
+            </div>
+            
+            <div id="split-mode-section" style="display:none; background:#f0f9ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bae6fd; overflow-x: auto;">
+                <form action="/add_split_voucher" method="POST" id="splitForm" onsubmit="return validateSplitTotal()" style="min-width: 800px;">
+                    <input type="hidden" name="source_page" value="{{ active_page }}">
+                    
+                    <!-- MASTER DETAILS -->
+                    <div class="flex-row" style="margin-bottom:15px; background:white; padding:15px; border-radius:8px; border:1px solid #7dd3fc; align-items: flex-end;">
+                        <div class="form-group flex-1" style="margin:0;"><label>Date</label><input type="date" name="date" class="auto-date" required></div>
+                        <div class="form-group flex-1" style="margin:0;"><label>Time</label><input type="time" name="time" class="auto-time" required></div>
+                        <div class="form-group flex-1" style="margin:0;"><label>Mode</label><select name="payment_mode" required><option value="Cash">Cash</option><option value="Online">Online</option></select></div>
+                        <div class="form-group flex-2" style="margin:0; flex:2;"><label>Master Description / Bill No.</label><input type="text" name="master_description" required placeholder="e.g. Bulk Cement Purchase"></div>
+                        <div class="form-group flex-1" style="margin:0;"><label style="color:var(--danger);">Total Master Amount (₹)</label>
+                            <input type="number" step="0.01" min="0" id="master_amount" name="master_amount" required style="border-color:var(--danger); font-weight:bold; font-size:1.1em;" onkeyup="updateSplitCalc()" onchange="updateSplitCalc()">
+                        </div>
+                    </div>
+                    
+                    <!-- CALCULATOR HEADER -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; background:#e0f2fe; padding: 10px; border-radius: 6px;">
+                        <strong style="color:#0369a1;">Allocate to Accounts:</strong>
+                        <div style="font-size:1.1em; padding:5px 10px; background:white; border-radius:5px; border:1px solid #ccc; display: flex; gap: 15px;">
+                            <span>Allocated: <strong id="calc_assigned" style="color:green;">₹0.00</strong></span>
+                            <span>Remaining: <strong id="calc_remaining" style="color:red;">₹0.00</strong></span>
+                        </div>
+                    </div>
+
+                    <!-- SPLIT ROWS TABLE -->
+                    <table style="width: 100%; border: none; background: white; margin-bottom: 10px; border-radius: 6px; overflow: hidden;">
+                        <thead style="background: #bae6fd;">
+                            <tr>
+                                <th style="font-size: 0.85em; padding: 10px;">Voucher Nature</th>
+                                <th style="font-size: 0.85em; padding: 10px;">Ledger Account</th>
+                                <th style="font-size: 0.85em; padding: 10px;">Category</th>
+                                <th style="font-size: 0.85em; padding: 10px; text-align: right;">Amount (₹)</th>
+                                <th style="font-size: 0.85em; padding: 10px; text-align: center;">Act</th>
+                            </tr>
+                        </thead>
+                        <tbody id="split-entry-body">
+                        </tbody>
+                    </table>
+                    
+                    <div style="display:flex; justify-content: space-between; margin-top: 15px;">
+                        <button type="button" class="btn btn-outline" onclick="addSplitRow()" style="background:white;">+ Add Another Account</button>
+                        <button class="btn btn-success" type="submit" id="saveSplitBtn" style="padding: 12px 30px; font-size: 1.1em;" disabled>💾 Save Split Voucher</button>
+                    </div>
+                </form>
+            </div>
     <script>
         const approverOpts = `<option value="">-- Pending --</option>{% for u in approver_names %}<option value="{{u}}">{{u}}</option>{% endfor %}`;
         const accountOpts = `<option value="main">🏢 Main Book</option><optgroup label="👥 Persons">{% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}</option>{% endfor %}</optgroup><optgroup label="💸 Dasti">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}</option>{% endfor %}</optgroup>`;
@@ -653,7 +749,68 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
             renderTable('payments-tbody', 1, 'payment-page-info');
             setAutoDateTime();
         });
+        function toggleSplitMode() {
+            const sm = document.getElementById('split-mode-section');
+            const bm = document.getElementById('batch-mode-section');
+            if(sm.style.display === 'none') {
+                sm.style.display = 'block';
+                bm.style.display = 'none';
+                setAutoDateTime();
+                // Add 2 blank rows by default
+                if(document.getElementById('split-entry-body').children.length === 0) { addSplitRow(); addSplitRow(); }
+            } else {
+                sm.style.display = 'none';
+                bm.style.display = 'block';
+            }
+        }
+
+        function addSplitRow() {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="padding:8px;"><select name="txn_nature[]" required style="font-size:0.9em; padding:8px; font-weight:bold;"><option value="slip_in" style="color:red;">➖ Slip/Bill (Debit)</option><option value="advance" style="color:blue;">📤 Advance (Credit)</option><option value="receive_cash" style="color:green;">📥 Receive Cash (Credit)</option></select></td>
+                <td style="padding:8px;"><select name="primary_account[]" required style="font-size:0.9em; padding:8px; font-weight:bold;">${accountOpts}</select></td>
+                <td style="padding:8px;"><select name="category[]" required style="font-size:0.9em; padding:8px;">${catOpts}</select></td>
+                <td style="padding:8px;"><input type="number" step="0.01" min="0" name="split_amount[]" class="split-amt-input" value="0" required style="font-size:0.9em; padding:8px; font-weight:bold; text-align:right;" onkeyup="updateSplitCalc()" onchange="updateSplitCalc()"></td>
+                <td style="padding:8px; text-align:center;"><button type="button" onclick="this.closest('tr').remove(); updateSplitCalc();" style="background:var(--danger); color:white; padding:6px 12px; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">X</button></td>
+            `;
+            document.getElementById('split-entry-body').appendChild(tr);
+        }
+
+        function updateSplitCalc() {
+            let masterAmt = parseFloat(document.getElementById('master_amount').value) || 0;
+            let assigned = 0;
+            document.querySelectorAll('.split-amt-input').forEach(inp => {
+                assigned += (parseFloat(inp.value) || 0);
+            });
+            let remaining = masterAmt - assigned;
+            
+            document.getElementById('calc_assigned').innerText = '₹' + assigned.toFixed(2);
+            let remSpan = document.getElementById('calc_remaining');
+            remSpan.innerText = '₹' + remaining.toFixed(2);
+            
+            let saveBtn = document.getElementById('saveSplitBtn');
+            // Allow save only if remaining is 0 (accounting for floating point math)
+            if (Math.abs(remaining) < 0.01 && masterAmt > 0) {
+                remSpan.style.color = 'green';
+                saveBtn.disabled = false;
+            } else {
+                remSpan.style.color = 'red';
+                saveBtn.disabled = true;
+            }
+        }
+
+        function validateSplitTotal() {
+            let masterAmt = parseFloat(document.getElementById('master_amount').value) || 0;
+            let assigned = 0;
+            document.querySelectorAll('.split-amt-input').forEach(inp => { assigned += (parseFloat(inp.value) || 0); });
+            if (Math.abs(masterAmt - assigned) > 0.01) {
+                alert("Cannot Save! The sum of individual accounts must exactly match the Total Master Amount.");
+                return false;
+            }
+            return true;
+        }
     </script>
+    
 </body></html>'''
 REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dynamic Reports</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
@@ -747,9 +904,11 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
             <h3 style="margin-top: 0; color: var(--primary);">📅 Search & Bulk Update Dates</h3>
             <form action="/bulk_edit_date" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
                 <input type="hidden" name="action" value="search">
-                <div class="form-group flex-1" style="min-width: 150px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}" required></div>
-                <div class="form-group flex-1" style="min-width: 150px;"><label>To Date</label><input type="date" name="end_date" value="{{ end_date }}" required></div>
-                <button class="btn" style="background:indigo; height: 45px; padding: 10px 25px;" type="submit">🔍 Search Entries</button>
+                <div class="form-group flex-1" style="min-width: 130px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}" required></div>
+                <div class="form-group flex-1" style="min-width: 130px;"><label>To Date</label><input type="date" name="end_date" value="{{ end_date }}" required></div>
+                <div class="form-group flex-1" style="min-width: 130px;"><label>Amount (Opt)</label><input type="number" step="0.01" name="search_amount" value="{{ search_amount }}" placeholder="Exact ₹"></div>
+                <div class="form-group flex-2" style="min-width: 180px; flex: 2;"><label>Detail / Desc (Opt)</label><input type="text" name="search_desc" value="{{ search_desc }}" placeholder="Search text..."></div>
+                <button class="btn" style="background:indigo; height: 45px; padding: 10px 25px;" type="submit">🔍 Search</button>
             </form>
         </div>
         
@@ -759,7 +918,6 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
                 <input type="hidden" name="action" value="update_dates">
                 
                 <div style="padding: 15px 20px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 15px;">
-                    
                     <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
                         <div class="form-group" style="margin-bottom: 0; min-width: 250px;">
                             <label style="color:#92400e;">Set New Date For Selected Entries:</label>
@@ -774,12 +932,10 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
                             <span style="color:#92400e; font-weight:bold; font-size: 0.9em;">Entries Selected</span>
                             <strong id="calc-count" style="font-size: 1.3em;">0</strong>
                         </div>
-                        
                         <div style="display: flex; flex-direction: column; min-width: 150px;">
                             <span style="color: var(--success); font-weight:bold; font-size: 0.9em;">Total Positive (+)</span>
                             <strong id="calc-positive" style="font-size: 1.3em;">₹0.00</strong>
                         </div>
-                        
                         <div style="display: flex; flex-direction: column; min-width: 150px;">
                             <span style="color: var(--danger); font-weight:bold; font-size: 0.9em;">Total Negative (-)</span>
                             <strong id="calc-negative" style="font-size: 1.3em;">₹0.00</strong>
@@ -797,7 +953,6 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
                             </div>
                         </div>
                     </div>
-
                 </div>
                 
                 <table style="width: 100%; border: none;">
@@ -808,6 +963,7 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
                         <th>Current Date & Time</th>
                         <th>Category / Detail</th>
                         <th style="text-align: right; padding-right: 20px;">Amount</th>
+                        <th style="text-align: center;">Act</th>
                     </tr>
                     {% for t in results %}
                     <tr>
@@ -828,9 +984,12 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
                                 <strong style="color:green;">+ ₹{{ "{:,.2f}".format(t.amount | default(0)) }}</strong>
                             {% endif %}
                         </td>
+                        <td style="text-align: center;">
+                            <a href="/edit/transactions/{{ t.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;" title="Edit this entry">✏️</a>
+                        </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="4" style="text-align:center; color:#9ca3af; padding: 40px;">No entries found in this date range.</td></tr>
+                    <tr><td colspan="5" style="text-align:center; color:#9ca3af; padding: 40px;">No entries found matching criteria.</td></tr>
                     {% endfor %}
                 </table>
                 
@@ -945,8 +1104,6 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
         {% endif %}
     </div>
 </body></html>'''
-
-
 
 MAIN_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Ledger</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
@@ -1426,8 +1583,11 @@ def index():
     dasti_persons.sort(key=lambda x: x.get('name', ''))
     
     all_txns = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
-    all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
-    
+    # Apply Dashboard Sort Order from Global Settings
+    settings = get_global_settings()
+    is_desc = (settings.get('dashboard_sort_order', 'desc') == 'desc')
+    all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=is_desc)
+
     # Summary calculations using proper IST timezone
     summary_txns = [t for t in all_txns if t.get('status') == 'approved']
     now = datetime.now(IST)
@@ -1533,9 +1693,10 @@ def login():
                 session['can_express_cashout'] = user.get('can_express_cashout', 0)
                 session['can_view_reports'] = user.get('can_view_reports', 0)
                 session['can_view_trash'] = user.get('can_view_trash', 0)
+                session['can_delete_logs'] = user.get('can_delete_logs', 0)
                 
                 if session['role'] == 'superadmin':
-                    session['can_approve'] = session['can_edit'] = session['can_view_reports'] = session['can_view_trash'] = 1
+                    session['can_approve'] = session['can_edit'] = session['can_view_reports'] = session['can_view_trash'] = session['can_delete_logs'] = 1
                     
                 return redirect(url_for('index'))
                 
@@ -1556,8 +1717,49 @@ def update_settings():
         'receipt_display_mode': request.form.get('receipt_display_mode', 'strict'),
         'edit_action_mode': request.form.get('edit_action_mode', 'button'),
         'report_flag_mode': request.form.get('report_flag_mode', 'both'),
-        'report_pdf_format': request.form.get('report_pdf_format', 'standard')
+        'report_pdf_format': request.form.get('report_pdf_format', 'standard'),
+        'dashboard_sort_order': request.form.get('dashboard_sort_order', 'desc')
     }, merge=True)
+    return redirect(url_for('manage_users'))
+
+@app.route('/reindex_database', methods=['POST'])
+def reindex_database():
+    if 'user_id' not in session or session.get('role') != 'superadmin': 
+        return redirect(url_for('index'))
+    
+    firm_id = session['firm_id']
+    batch = db.batch()
+    update_count = 0
+    
+    # Process all ledgers
+    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+        docs = db.collection(collection).where('user_id', '==', firm_id).stream()
+        for d in docs:
+            data = d.to_dict()
+            date_val = data.get('date', '')
+            time_val = data.get('time', '00:00')
+            
+            # Reconstruct an actual Unix timestamp from the date and time strings
+            try:
+                dt_obj = datetime.strptime(f"{date_val} {time_val}", "%Y-%m-%d %H:%M")
+                new_created_at = dt_obj.timestamp()
+                
+                # Only update if it actually needs fixing to save writes
+                if data.get('created_at') != new_created_at:
+                    batch.update(d.reference, {'created_at': new_created_at})
+                    update_count += 1
+                
+                # Firestore batches hold max 500 operations. Execute and open a new batch if we hit 450.
+                if update_count >= 450:
+                    batch.commit()
+                    batch = db.batch()
+                    update_count = 0
+            except Exception:
+                pass # Skip if date format is severely malformed
+                
+    if update_count > 0:
+        batch.commit()
+        
     return redirect(url_for('manage_users'))
 
 @app.route('/add_fast_unified', methods=['POST'])
@@ -1745,10 +1947,29 @@ def add_batch_unified():
 
 @app.route('/logs')
 def logs():
-    if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): return redirect(url_for('index'))
+    if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): 
+        return redirect(url_for('index'))
+    
     firm_id = session['firm_id']
-    logs_data = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('edit_logs').where('firm_id', '==', firm_id).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(100).stream()]
-    return render_template_string(LOGS_TEMPLATE, logs=logs_data, username=session['username'], active_page='logs')
+    link_id_filter = request.args.get('link_id')
+    
+    query = db.collection('edit_logs').where('firm_id', '==', firm_id)
+    if link_id_filter:
+        query = query.where('link_id', '==', link_id_filter)
+        
+    logs_data = [{'id': doc.id, **doc.to_dict()} for doc in query.order_by('timestamp', direction=firestore.Query.DESCENDING).limit(100).stream()]
+    return render_template_string(LOGS_TEMPLATE, logs=logs_data, username=session['username'], active_page='logs', link_id_filter=link_id_filter)
+
+@app.route('/delete_log/<string:log_id>')
+def delete_log(log_id):
+    if 'user_id' not in session or (session.get('can_delete_logs') != 1 and session.get('role') != 'superadmin'): 
+        return redirect(url_for('logs'))
+        
+    doc_ref = db.collection('edit_logs').document(log_id)
+    if doc_ref.get().to_dict().get('firm_id') == session['firm_id']:
+        doc_ref.delete()
+        
+    return redirect(request.referrer or url_for('logs'))
 
 @app.route('/flag_entries', methods=['GET', 'POST'])
 def flag_entries():
@@ -1808,6 +2029,8 @@ def bulk_edit_date():
     now = datetime.now(IST)
     start_date = (now - timedelta(days=7)).strftime('%Y-%m-%d')
     end_date = now.strftime('%Y-%m-%d')
+    search_amount = ''
+    search_desc = ''
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -1815,12 +2038,31 @@ def bulk_edit_date():
         if action == 'search':
             start_date = request.form.get('start_date', start_date)
             end_date = request.form.get('end_date', end_date)
+            search_amount = request.form.get('search_amount', '').strip()
+            search_desc = request.form.get('search_desc', '').strip().lower()
             
             docs = db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()
             for d in docs:
                 data = d.to_dict()
+                data['id'] = d.id  # Ensure ID is included for the Edit button link
                 date_val = data.get('date', '')
+                
                 if start_date <= date_val <= end_date:
+                    # Apply Amount Filter if provided
+                    if search_amount:
+                        try:
+                            if float(data.get('amount', 0)) != float(search_amount):
+                                continue
+                        except ValueError:
+                            pass
+                            
+                    # Apply Description/Category Filter if provided
+                    if search_desc:
+                        desc_text = data.get('description', '').lower()
+                        cat_text = data.get('category', '').lower()
+                        if search_desc not in desc_text and search_desc not in cat_text:
+                            continue
+                            
                     results.append(data)
                     
             results.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
@@ -1856,7 +2098,7 @@ def bulk_edit_date():
             
             return redirect(url_for('bulk_edit_date'))
 
-    return render_template_string(BULK_EDIT_DATE_TEMPLATE, results=results, has_searched=has_searched, start_date=start_date, end_date=end_date, username=session['username'], active_page='bulk_date')
+    return render_template_string(BULK_EDIT_DATE_TEMPLATE, results=results, has_searched=has_searched, start_date=start_date, end_date=end_date, search_amount=search_amount, search_desc=search_desc, username=session['username'], active_page='bulk_date')
 
 @app.route('/delete/<string:table_name>/<string:row_id>')
 def delete_entry(table_name, row_id):
@@ -1887,8 +2129,15 @@ def main_ledger():
     firm_id = session['firm_id']
     
     all_txns = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
-    all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
     
+    # Apply Dashboard Sort Order from Global Settings
+    # Ensure this is at the top of your routes to capture the user's preference
+    settings = get_global_settings()
+    is_desc = (settings.get('dashboard_sort_order', 'desc') == 'desc')
+
+    # Force the sort immediately after fetching from Firebase
+    all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=is_desc)
+
     total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in') and t.get('status') == 'approved')
     total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') == 'expense' and t.get('status') == 'approved')
     total_dasti = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') == 'dasti_out' and t.get('status') == 'approved')
@@ -2175,6 +2424,7 @@ def edit_user(uid):
             'can_express_cashout': int(request.form.get('can_express_cashout', 0)),
             'can_view_reports': int(request.form.get('can_view_reports', 0)),
             'can_view_trash': int(request.form.get('can_view_trash', 0)),
+            'can_delete_logs': int(request.form.get('can_delete_logs', 0)),
             'idle_timeout_minutes': int(request.form.get('idle_timeout', 15))
         }
         new_pw = request.form.get('password', '').strip()
@@ -2219,9 +2469,11 @@ def add_user():
         'can_express_cashout': int(request.form.get('can_express_cashout', 0)),
         'can_view_reports': int(request.form.get('can_view_reports', 0)),
         'can_view_trash': int(request.form.get('can_view_trash', 0)),
+        'can_delete_logs': int(request.form.get('can_delete_logs', 0)),
         'idle_timeout_minutes': int(request.form.get('idle_timeout', 15))
     })
     return redirect(url_for('manage_users'))
+
 
 @app.route('/approvals')
 def approvals():
@@ -2526,6 +2778,96 @@ def add_express():
         'is_flagged': 0
     })
     return redirect(request.referrer or url_for('index'))
+@app.route('/add_split_voucher', methods=['POST'])
+def add_split_voucher():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    firm_id = session['firm_id']
+    
+    date_val = request.form['date']
+    time_val = request.form['time']
+    mode = request.form['payment_mode']
+    master_desc = request.form['master_description'].strip()
+    master_amount = float(request.form['master_amount'])
+    
+    natures = request.form.getlist('txn_nature[]')
+    accounts = request.form.getlist('primary_account[]')
+    cats = request.form.getlist('category[]')
+    amts = request.form.getlist('split_amount[]')
+    
+    existing_cats = get_categories(firm_id)
+    batch = db.batch()
+    
+    # Generate ONE universal ID for the whole split group
+    shared_link_id = uuid.uuid4().hex[:12]
+    
+    for i in range(len(amts)):
+        if amts[i].strip() and float(amts[i]) > 0:
+            amt = float(amts[i])
+            cat = cats[i]
+            if cat not in existing_cats:
+                db.collection('categories').add({'firm_id': firm_id, 'name': cat})
+                existing_cats.append(cat)
+                
+            txn_nature = natures[i]
+            account_raw = accounts[i]
+            
+            account_type = 'main'
+            primary_id = None
+            person_name = ''
+            
+            if account_raw.startswith('person_'):
+                primary_id = account_raw.split('_')[1]
+                account_type = 'person'
+                person_name = db.collection('persons').document(primary_id).get().to_dict().get('name', '')
+            elif account_raw.startswith('dasti_'):
+                primary_id = account_raw.split('_')[1]
+                account_type = 'dasti'
+                person_name = db.collection('dasti_persons').document(primary_id).get().to_dict().get('name', '')
+                
+            final_nature = txn_nature
+            if account_type == 'main':
+                final_nature = 'direct_in' if txn_nature == 'receive_cash' else 'direct_out'
+                
+            base_txn = {
+                'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode, 
+                'category': cat, 'amount': amt, 'link_id': shared_link_id, 
+                'status': 'approved' if session.get('can_approve') else 'pending', 
+                'approved_by': session['username'] if session.get('can_approve') else '', 
+                'deleted': 0, 'created_at': time.time(),
+                'voucher_nature': final_nature, 'is_flagged': 0 
+            }
+
+            # Embed the split detail into the description
+            leg_desc = f"{master_desc} (Split: {person_name if person_name else 'Main'})"
+
+            if account_type == 'main':
+                db_type = 'income' if txn_nature == 'receive_cash' else 'expense'
+                batch.set(db.collection('transactions').document(), {**base_txn, 'description': leg_desc, 'type': db_type})
+                
+            elif account_type == 'person':
+                if txn_nature == 'slip_in':
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': leg_desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Slip ({person_name}): {master_desc}", 'type': 'batch_ledger_out'})
+                elif txn_nature == 'advance':
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': leg_desc, 'type': 'advance'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Transfer Out ({person_name}): {master_desc}", 'type': 'dasti_out'})
+                elif txn_nature == 'receive_cash':
+                    batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': leg_desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Transfer In ({person_name}): {master_desc}", 'type': 'income', 'voucher_nature': 'receive_cash'})
+                    
+            elif account_type == 'dasti':
+                if txn_nature == 'slip_in':
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': leg_desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti Slip ({person_name}): {master_desc}", 'type': 'batch_ledger_out'})
+                elif txn_nature == 'advance':
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': leg_desc, 'type': 'advance'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti Out ({person_name}): {master_desc}", 'type': 'dasti_voucher_out'})
+                elif txn_nature == 'receive_cash':
+                    batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': leg_desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': f"Dasti In ({person_name}): {master_desc}", 'type': 'dasti_voucher_in', 'voucher_nature': 'receive_cash'})
+
+    batch.commit()
+    return redirect(request.referrer or url_for('index'))
 
 @app.route('/demo_game')
 def demo_game():
@@ -2555,6 +2897,7 @@ def register():
             'can_express_cashout': 1,
             'can_view_reports': 1,
             'can_view_trash': 1,
+            'can_delete_logs': 1,
             'idle_timeout_minutes': 15
         })
         
@@ -2568,6 +2911,7 @@ def register():
         session['can_express_cashout'] = 1
         session['can_view_reports'] = 1
         session['can_view_trash'] = 1
+        session['can_delete_logs'] = 1
         session['idle_timeout'] = 15
         
         opening_balance = float(request.form.get('opening_balance', 0))
@@ -2613,6 +2957,33 @@ def bulk_delete():
     batch.commit()
     return redirect(request.referrer or url_for('index'))
 
- 
+@app.route('/edit_by_link/<string:link_id>')
+def edit_by_link(link_id):
+    if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): 
+        return redirect(url_for('index'))
+        
+    if link_id == 'bulk_edit':
+        return redirect(url_for('logs'))
+        
+    firm_id = session['firm_id']
+    
+    # 1. Check Main Transactions First
+    docs = list(db.collection('transactions').where('link_id', '==', link_id).where('user_id', '==', firm_id).limit(1).stream())
+    if docs:
+        return redirect(url_for('edit_entry', table_name='transactions', row_id=docs[0].id))
+        
+    # 2. If not found, check Person Ledger
+    p_docs = list(db.collection('person_ledger').where('link_id', '==', link_id).where('user_id', '==', firm_id).limit(1).stream())
+    if p_docs:
+        return redirect(url_for('edit_entry', table_name='person_ledger', row_id=p_docs[0].id))
+        
+    # 3. If still not found, check Dasti Ledger
+    d_docs = list(db.collection('dasti_ledger').where('link_id', '==', link_id).where('user_id', '==', firm_id).limit(1).stream())
+    if d_docs:
+        return redirect(url_for('edit_entry', table_name='dasti_ledger', row_id=d_docs[0].id))
+        
+    # Fallback if voucher was permanently deleted from the trash
+    return redirect(url_for('logs'))
+
 if __name__ == '__main__':
     pass

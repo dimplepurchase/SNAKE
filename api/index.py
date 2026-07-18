@@ -51,7 +51,8 @@ def get_global_settings():
         'edit_action_mode': 'button',
         'report_flag_mode': 'both',
         'report_pdf_format': 'standard',
-        'dashboard_sort_order': 'desc'
+        'dashboard_sort_order': 'desc',
+        'dashboard_ledger_visibility': 'main_only'   # <-- ADD THIS LINE
     }
 
 # --- KILL SWITCH INTERCEPTOR ---
@@ -264,7 +265,8 @@ USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + 
         <div class="form-group flex-1" style="min-width: 200px;"><label>Report Flag Filter</label><select name="report_flag_mode" required><option value="both" {% if sys_settings.report_flag_mode == 'both' %}selected{% endif %}>Show All Entries</option><option value="flagged" {% if sys_settings.report_flag_mode == 'flagged' %}selected{% endif %}>Flagged Only</option><option value="unflagged" {% if sys_settings.report_flag_mode == 'unflagged' %}selected{% endif %}>Unflagged Only</option></select></div>
         <div class="form-group flex-1" style="min-width: 200px;"><label>Report PDF Format</label><select name="report_pdf_format" required><option value="standard" {% if sys_settings.report_pdf_format == 'standard' %}selected{% endif %}>Standard Detail</option><option value="summary_breakdown" {% if sys_settings.report_pdf_format == 'summary_breakdown' %}selected{% endif %}>Summary Breakdown</option></select></div>
         <div class="form-group flex-1" style="min-width: 200px;"><label>Dashboard Ledger Sort</label><select name="dashboard_sort_order" required style="border-color:#38bdf8; font-weight:bold;"><option value="desc" {% if sys_settings.dashboard_sort_order == 'desc' %}selected{% endif %}>Newest First (Desc) ⬇️</option><option value="asc" {% if sys_settings.dashboard_sort_order == 'asc' %}selected{% endif %}>Oldest First (Asc) ⬆️</option></select></div>
-        
+        <div class="form-group flex-1" style="min-width: 220px;"><label>Dashboard Receipts/Payments Show</label><select name="dashboard_ledger_visibility" required style="border-color:#38bdf8; font-weight:bold;"><option value="main_only" {% if sys_settings.dashboard_ledger_visibility == 'main_only' %}selected{% endif %}>🏢 Main Cash Book Only</option><option value="all" {% if sys_settings.dashboard_ledger_visibility == 'all' %}selected{% endif %}>🏢➕👥 Main + Person/Dasti Linked Entries</option></select></div>
+
         <button class="btn" type="submit" style="padding: 10px 25px; height: 45px; background:#0284c7; width: 100%;">💾 Save Global Settings</button>
     </form>
 </div>
@@ -940,6 +942,16 @@ REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dynamic Reports</title>'
         </div>
 
         {% if session.get('can_view_ledger_details') == 1 or session.get('role') == 'superadmin' %}
+        {% if show_ledger_entries %}
+        <div class="card" style="padding: 0; overflow-x: auto;">
+          
+        </div>
+        {% else %}
+        <div class="card" style="padding: 40px; text-align: center; color: #6b7280; font-style: italic;">
+            <div style="font-size: 2em; margin-bottom: 10px;"></div>
+            
+        </div>
+        {% endif %}
         <div class="card" style="padding: 0; overflow-x: auto;">
             <div style="padding: 15px 25px; background: #f8fafc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
                 <h3 style="margin: 0;">Detailed Transaction History</h3>
@@ -1327,7 +1339,6 @@ PERSONS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Person Ledgers</title>''
             </table>
         </div>
     </div></body></html>'''
-
 PERSON_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Account: {{ person.name }}</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;"><a href="/persons" class="btn-outline" style="text-decoration: none; padding: 8px 15px; border-radius: 8px; font-size: 0.9em;">← Back to Ledgers</a><h2 style="margin: 0; font-size: 1.6em;">Person Ledger: <span style="color: var(--primary);">{{ person.name }}</span></h2></div>
@@ -1336,7 +1347,8 @@ PERSON_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Account: {{ perso
             <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Slips / Settlements</h4><div class="value" style="color: var(--success);">- ₹{{ "{:,.2f}".format(settlements) }}</div></div>
             <div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: var(--primary);">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %}<span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div>
         </div>
-        
+
+        {% if show_ledger_entries %}
         <div class="card" style="padding: 0; overflow-x: auto;">
             <div style="padding: 15px 25px; background: #f8fafc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
                 <h3 style="margin: 0;">Detailed Transaction History</h3>
@@ -1346,7 +1358,7 @@ PERSON_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Account: {{ perso
                     <button type="button" class="btn btn-sm" style="background: #d1fae5; color: #065f46;" onclick="filterLedger('out')">📤 Slip Settled (-)</button>
                 </div>
             </div>
-            
+
             <form action="/bulk_delete" method="POST" onsubmit="return confirm('Are you sure you want to delete the selected entries?');">
                 <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border);">
                     <button type="submit" class="btn btn-danger btn-sm">🗑️ Delete Selected Entries</button>
@@ -1380,6 +1392,11 @@ PERSON_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Account: {{ perso
                 </table>
             </form>
         </div>
+        {% else %}
+        <div class="card" style="padding: 40px; text-align: center; color: #6b7280; font-style: italic;">
+            <div style="font-size: 2em; margin-bottom: 10px;"></div>
+            
+        {% endif %}
     </div>
     <script>
         function filterLedger(type) {
@@ -1425,7 +1442,6 @@ DASTI_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Ledger</title
             </table>
         </div>
     </div></body></html>'''
-
 DASTI_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Account: {{ person.name }}</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;"><a href="/dasti_ledger" class="btn-outline" style="text-decoration: none; padding: 8px 15px; border-radius: 8px; font-size: 0.9em;">← Back to Dasti Ledgers</a><h2 style="margin: 0; font-size: 1.6em;">Dasti Ledger: <span style="color: #0ea5e9;">{{ person.name }}</span></h2></div>
@@ -1434,7 +1450,8 @@ DASTI_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Account: {{ 
             <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Total Slips / Settlements</h4><div class="value" style="color: var(--success);">- ₹{{ "{:,.2f}".format(settlements) }}</div></div>
             <div class="stat-card" style="border-top: 4px solid #8b5cf6; background: #f8fafc;"><h4>Net Status</h4><div class="value">{% if balance > 0 %}<span style="color: #0ea5e9;">+ ₹{{ "{:,.2f}".format(balance) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Owes Firm</small></span>{% elif balance < 0 %}<span style="color: var(--success);">- ₹{{ "{:,.2f}".format(balance|abs) }}<br><small style="font-size: 0.5em; color: #4b5563; text-transform: uppercase;">Firm Owes</small></span>{% else %}<span style="color: #6b7280; font-size: 0.9em;">Fully Settled</span>{% endif %}</div></div>
         </div>
-        
+
+        {% if show_ledger_entries %}
         <div class="card" style="padding: 0; overflow-x: auto;">
             <div style="padding: 15px 25px; background: #f8fafc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
                 <h3 style="margin: 0;">Detailed Transaction History</h3>
@@ -1478,6 +1495,12 @@ DASTI_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Account: {{ 
                 </table>
             </form>
         </div>
+        {% else %}
+        <div class="card" style="padding: 40px; text-align: center; color: #6b7280; font-style: italic;">
+            <div style="font-size: 2em; margin-bottom: 10px;">🔒</div>
+            Individual entries are hidden by the admin's dashboard setting.<br>Totals above are still accurate.
+        </div>
+        {% endif %}
     </div>
     <script>
         function filterLedger(type) {
@@ -1773,6 +1796,8 @@ def index():
     
     # Filter Tables (Receipts/Payments) based on user selection
     # Filter Tables (Receipts/Payments) based on user selection
+    # Filter Tables (Receipts/Payments) based on user selection
+    # Filter Tables (Receipts/Payments) based on user selection
     incomes = []
     expenses = []
     
@@ -1785,11 +1810,14 @@ def index():
         if time_filter == 'year' and not d.startswith(year_str): continue
         
         t_type = t.get('type')
-        # FIX: Ensure Dasti inward settlements and direct entries show under Receipts
-        if t_type in ('income', 'dasti_voucher_in', 'direct_in'):
+        show_all_linked = (settings.get('dashboard_ledger_visibility', 'main_only') == 'all')
+        if t_type in ('income', 'direct_in'):
             incomes.append(t)
-        # FIX: Ensure Dasti outward advances, person advances, and slips show under Payments
-        elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out'):
+        elif show_all_linked and t_type in ('dasti_voucher_in',):
+            incomes.append(t)
+        elif t_type in ('expense', 'direct_out'):
+            expenses.append(t)
+        elif show_all_linked and t_type in ('batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance'):
             expenses.append(t)
 
     all_person_ledger = [doc.to_dict() for doc in db.collection('person_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
@@ -1867,9 +1895,11 @@ def update_settings():
         'edit_action_mode': request.form.get('edit_action_mode', 'button'),
         'report_flag_mode': request.form.get('report_flag_mode', 'both'),
         'report_pdf_format': request.form.get('report_pdf_format', 'standard'),
-        'dashboard_sort_order': request.form.get('dashboard_sort_order', 'desc')
+        'dashboard_sort_order': request.form.get('dashboard_sort_order', 'desc'),
+        'dashboard_ledger_visibility': request.form.get('dashboard_ledger_visibility', 'main_only')  # <-- ADD THIS LINE
     }, merge=True)
     return redirect(url_for('manage_users'))
+
 
 @app.route('/reindex_database', methods=['POST'])
 def reindex_database():
@@ -2362,7 +2392,10 @@ def dasti_account(person_id):
     advances = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'advance' and t.get('status') == 'approved')
     settlements = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'settlement' and t.get('status') == 'approved')
     
-    return render_template_string(DASTI_ACCOUNT_TEMPLATE, person=person, txns=txns, balance=(advances - settlements), advances=advances, settlements=settlements, username=session['username'], active_page='dasti_ledger')
+    settings = get_global_settings()
+    show_ledger_entries = (settings.get('dashboard_ledger_visibility', 'main_only') == 'all')
+    return render_template_string(DASTI_ACCOUNT_TEMPLATE, person=person, txns=txns, balance=(advances - settlements), advances=advances, settlements=settlements, username=session['username'], active_page='dasti_ledger', show_ledger_entries=show_ledger_entries)
+
 
 @app.route('/edit_dasti_person/<string:id>')
 def edit_dasti_person(id):
@@ -2433,7 +2466,10 @@ def person_account(person_id):
     advances = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'advance' and t.get('status') == 'approved')
     settlements = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'settlement' and t.get('status') == 'approved')
     
-    return render_template_string(PERSON_ACCOUNT_TEMPLATE, person=person, txns=txns, balance=(advances - settlements), advances=advances, settlements=settlements, username=session['username'], active_page='persons')
+    settings = get_global_settings()
+    show_ledger_entries = (settings.get('dashboard_ledger_visibility', 'main_only') == 'all')
+    return render_template_string(PERSON_ACCOUNT_TEMPLATE, person=person, txns=txns, balance=(advances - settlements), advances=advances, settlements=settlements, username=session['username'], active_page='persons', show_ledger_entries=show_ledger_entries)
+
 
 @app.route('/edit_person/<string:id>')
 def edit_person(id):

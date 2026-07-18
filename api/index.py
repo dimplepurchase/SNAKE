@@ -597,8 +597,9 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
                     {% if dasti_breakdown %}
                     <div style="margin-top: 8px; font-size: 0.85em; color: #0369a1; text-align: left; border-top: 1px solid #bae6fd; padding-top: 8px;">
                         {% for d in dasti_breakdown %}
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
-                            <span>👤 {{ d.name }}</span> <strong>₹{{ "{:,.2f}".format(d.amount) }}</strong>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 3px; align-items: center;">
+                            <span>👤 <a href="/person_account/{{ d.id }}" style="color: #0284c7; text-decoration: none; font-weight: 600; transition: 0.2s;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">{{ d.name }}</a></span> 
+                            <strong>₹{{ "{:,.2f}".format(d.amount) }}</strong>
                         </div>
                         {% endfor %}
                     </div>
@@ -1743,7 +1744,8 @@ def index():
     all_txns = []
     for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream():
         data = doc.to_dict()
-        if data.get('type') in ('split_expense', 'split_income'):
+        # UPDATE THIS LINE: Add 'split_master'
+        if data.get('type') in ('split_expense', 'split_income', 'split_master'):
             continue
         all_txns.append({'id': doc.id, **data})
     # Apply Dashboard Sort Order from Global Settings
@@ -1834,7 +1836,7 @@ def index():
         acc_bals[f"person_{p['id']}"] = owed
         if owed > 0:
             total_dasti_ledger += owed
-            dasti_breakdown.append({'name': p['name'], 'amount': owed})
+            dasti_breakdown.append({'id': p['id'], 'name': p['name'], 'amount': owed})
 
     for dp in dasti_persons:
         adv = sum(float(l.get('amount', 0)) for l in all_dasti_ledger if l.get('dasti_person_id') == dp['id'] and l.get('type') == 'advance' and l.get('status') == 'approved')
@@ -2310,9 +2312,11 @@ def main_ledger():
     all_txns = []
     for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream():
         data = doc.to_dict()
-        if data.get('type') in ('split_expense', 'split_income'):
-            continue  # internal memo leg for a split-voucher "Main Book" row - not a real ledger line
+        # UPDATE THIS LINE: Add 'split_master'
+        if data.get('type') in ('split_expense', 'split_income', 'split_master'):
+            continue 
         all_txns.append({'id': doc.id, **data})
+
     
     # Apply Dashboard Sort Order from Global Settings
     
@@ -2563,7 +2567,9 @@ def reports():
     query = db.collection(collection_name).where('user_id', '==', firm_id).where('deleted', '==', 0).where('status', '==', 'approved')
     if pid_filter: query = query.where(pid_field, '==', pid_filter)
     
-    raw_results = [doc.to_dict() for doc in query.stream() if doc.to_dict().get('type') not in ('split_expense', 'split_income')]
+    # UPDATE THIS LINE: Add 'split_master'
+    raw_results = [doc.to_dict() for doc in query.stream() if doc.to_dict().get('type') not in ('split_expense', 'split_income', 'split_master')]
+
     
     results = []
     for r in raw_results:
@@ -2821,8 +2827,10 @@ def edit_entry(table_name, row_id):
             entry = master_txn
             for t in txn_docs:
                 if t['id'] != master_txn['id']:
-                    nat = 'slip_in' if t.get('type') == 'split_expense' else 'receive_cash'
+                    # UPDATE THIS LINE: Add 'expense' to the tuple
+                    nat = 'slip_in' if t.get('type') in ('split_expense', 'expense') else 'receive_cash'
                     splits_data.append({'account': 'main', 'category': t.get('category'), 'amount': t.get('amount'), 'nature': nat})
+
             for p in person_docs:
                 nat = 'advance' if p.get('type') == 'advance' else ('receive_cash' if p.get('voucher_nature') == 'receive_cash' else 'slip_in')
                 splits_data.append({'account': f"person_{p.get('person_id')}", 'category': p.get('category'), 'amount': p.get('amount'), 'nature': nat})
@@ -2889,6 +2897,7 @@ def edit_entry(table_name, row_id):
             master_amount = sum(r[3] for r in valid_rows)
 
             # Delete old split components entirely
+            # Delete old split components entirely
             for coll, docs_list in linked_docs.items():
                 for d in docs_list:
                     batch.delete(db.collection(coll).document(d['id']))
@@ -2902,18 +2911,16 @@ def edit_entry(table_name, row_id):
             if len(valid_rows) > 1:
                 display_name += " & Others"
 
-            has_out = any(r[1] in ('slip_in', 'advance') for r in valid_rows)
-            has_in = any(r[1] == 'receive_cash' for r in valid_rows)
-            master_type = 'income' if (has_in and not has_out) else 'expense'
-
+            # 1. Rebuild Master Entry as hidden 'split_master'
             batch.set(db.collection('transactions').document(), {
                 'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode, 'category': 'Split Settlement',
                 'amount': master_amount, 'link_id': link_id, 'status': new_status, 'approved_by': approved_by,
                 'deleted': entry.get('deleted', 0), 'created_at': entry.get('created_at', time.time()),
-                'voucher_nature': 'direct_out' if master_type == 'expense' else 'direct_in', 'is_flagged': is_flagged,
-                'description': f"{master_desc} ({display_name})", 'type': master_type
+                'voucher_nature': 'split_master', 'is_flagged': is_flagged,
+                'description': f"{master_desc} ({display_name})", 'type': 'split_master'
             })
 
+            # 2. Rebuild proper individual Legs
             for cat, txn_nature, account_raw, amt in valid_rows:
                 if cat not in existing_cats:
                     db.collection('categories').add({'firm_id': firm_id, 'name': cat})
@@ -2927,33 +2934,40 @@ def edit_entry(table_name, row_id):
                 }
 
                 if account_raw == 'main':
-                    leg_type = 'split_expense' if txn_nature in ('slip_in', 'advance') else 'split_income'
+                    real_type = 'expense' if txn_nature in ('slip_in', 'advance') else 'income'
+                    real_nature = 'direct_out' if real_type == 'expense' else 'direct_in'
                     batch.set(db.collection('transactions').document(), {
                         **base_txn,
                         'description': f"{master_desc} (Split-Gen)",
-                        'type': leg_type,
-                        'voucher_nature': txn_nature
+                        'type': real_type,
+                        'voucher_nature': real_nature
                     })
                 elif account_raw.startswith('person_'):
                     pid = account_raw.split('_')[1]
                     p_name = next((p['name'] for p in persons if p['id'] == pid), "")
                     l_desc = f"{master_desc} (Split: {p_name})"
                     if txn_nature == 'slip_in':
-                        batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': 'settlement'})
+                        batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': 'settlement', 'voucher_nature': txn_nature})
+                        batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'batch_ledger_out', 'voucher_nature': txn_nature})
                     elif txn_nature == 'advance':
-                        batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': 'advance'})
+                        batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': 'advance', 'voucher_nature': txn_nature})
+                        batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'dasti_out', 'voucher_nature': txn_nature})
                     elif txn_nature == 'receive_cash':
                         batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                        batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'income', 'voucher_nature': 'receive_cash'})
                 elif account_raw.startswith('dasti_'):
                     pid = account_raw.split('_')[1]
                     p_name = next((d['name'] for d in dasti_persons if d['id'] == pid), "")
                     l_desc = f"{master_desc} (Split: {p_name})"
                     if txn_nature == 'slip_in':
-                        batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': 'settlement'})
+                        batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': 'settlement', 'voucher_nature': txn_nature})
+                        batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'batch_ledger_out', 'voucher_nature': txn_nature})
                     elif txn_nature == 'advance':
-                        batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': 'advance'})
+                        batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': 'advance', 'voucher_nature': txn_nature})
+                        batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'dasti_voucher_out', 'voucher_nature': txn_nature})
                     elif txn_nature == 'receive_cash':
                         batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                        batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'dasti_voucher_in', 'voucher_nature': 'receive_cash'})
 
             batch.set(db.collection('edit_logs').document(), {
                 'firm_id': firm_id, 'link_id': link_id, 'edited_by': session['username'],
@@ -2963,6 +2977,7 @@ def edit_entry(table_name, row_id):
             })
             batch.commit()
             return redirect(request.referrer or url_for('index'))
+        
 
         # --- POST HANDLING FOR STANDARD VOUCHER ---
         cat_raw = request.form.get('category', entry.get('category', ''))
@@ -3088,20 +3103,11 @@ def add_split_voucher():
     cats = request.form.getlist('category[]')
     amts = request.form.getlist('split_amount[]')
 
-    # Total is ALWAYS computed on the server from the rows the user filled in -
-    # never trust a client-supplied total.
     valid_rows = [(cats[i], natures[i], accounts[i], float(amts[i]))
                   for i in range(len(amts)) if amts[i].strip() and float(amts[i]) > 0]
     if not valid_rows:
         return redirect(request.referrer or url_for('index'))
     master_amount = sum(r[3] for r in valid_rows)
-
-    # Direction of the single combined entry: only "Receive Cash" rows mean money
-    # coming IN; if any row is Slip/Advance, the voucher counts as OUT.
-    has_out = any(r[1] in ('slip_in', 'advance') for r in valid_rows)
-    has_in = any(r[1] == 'receive_cash' for r in valid_rows)
-    master_type = 'income' if (has_in and not has_out) else 'expense'
-    master_nature = 'direct_in' if master_type == 'income' else 'direct_out'
 
     existing_cats = get_categories(firm_id)
     batch = db.batch()
@@ -3115,21 +3121,16 @@ def add_split_voucher():
         display_name = db.collection('dasti_persons').document(first_acc.split('_')[1]).get().to_dict().get('name', 'Dasti')
     if len(valid_rows) > 1: display_name += " & Others"
 
-    # SINGLE combined entry - type is 'income'/'expense' like a normal transaction,
-    # so it is counted in the Main Cash Book balance AND shows as one line in the
-    # Payments/Receipts tables.
+    # 1. Hide the Master Entry from Ledgers by setting type to 'split_master'
     batch.set(db.collection('transactions').document(), {
         'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode,
         'category': 'Split Settlement', 'amount': master_amount, 'link_id': shared_link_id,
         'status': 'approved' if approver else 'pending', 'approved_by': approver,
-        'deleted': 0, 'created_at': time.time(), 'voucher_nature': master_nature,
-        'description': f"{master_desc} ({display_name})", 'type': master_type
+        'deleted': 0, 'created_at': time.time(), 'voucher_nature': 'split_master',
+        'description': f"{master_desc} ({display_name})", 'type': 'split_master'
     })
 
-    # Per-account breakdown legs - update each person/dasti account's own balance,
-    # and (for a 'main' row) a memo entry used only to rebuild the Edit screen.
-    # These are excluded from the Main Cash Book totals/lists so the voucher only
-    # ever shows once.
+    # 2. Write the individual legs as REAL transactions so they display correctly on the dashboard
     for cat, txn_nature, account_raw, amt in valid_rows:
         if cat not in existing_cats:
             db.collection('categories').add({'firm_id': firm_id, 'name': cat})
@@ -3141,26 +3142,42 @@ def add_split_voucher():
                      'deleted': 0, 'created_at': time.time(), 'is_flagged': 0}
 
         if account_raw == 'main':
+            real_type = 'expense' if txn_nature in ('slip_in', 'advance') else 'income'
+            real_nature = 'direct_out' if real_type == 'expense' else 'direct_in'
             batch.set(db.collection('transactions').document(), {
                 **base_txn, 'description': f"{master_desc} (Split-Gen)",
-                'type': 'split_expense' if txn_nature in ('slip_in', 'advance') else 'split_income',
-                'voucher_nature': txn_nature
+                'type': real_type, 'voucher_nature': real_nature
             })
         elif account_raw.startswith('person_'):
             pid = account_raw.split('_')[1]
             p_name = db.collection('persons').document(pid).get().to_dict().get('name', '')
             l_desc = f"{master_desc} (Split: {p_name})"
-            type_val = 'advance' if txn_nature == 'advance' else 'settlement'
-            batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': type_val, 'voucher_nature': txn_nature})
+            if txn_nature == 'slip_in':
+                batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': 'settlement', 'voucher_nature': txn_nature})
+                batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'batch_ledger_out', 'voucher_nature': txn_nature})
+            elif txn_nature == 'advance':
+                batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': 'advance', 'voucher_nature': txn_nature})
+                batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'dasti_out', 'voucher_nature': txn_nature})
+            elif txn_nature == 'receive_cash':
+                batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'income', 'voucher_nature': 'receive_cash'})
         elif account_raw.startswith('dasti_'):
             pid = account_raw.split('_')[1]
             p_name = db.collection('dasti_persons').document(pid).get().to_dict().get('name', '')
             l_desc = f"{master_desc} (Split: {p_name})"
-            type_val = 'advance' if txn_nature == 'advance' else 'settlement'
-            batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': type_val, 'voucher_nature': txn_nature})
+            if txn_nature == 'slip_in':
+                batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': 'settlement', 'voucher_nature': txn_nature})
+                batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'batch_ledger_out', 'voucher_nature': txn_nature})
+            elif txn_nature == 'advance':
+                batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': 'advance', 'voucher_nature': txn_nature})
+                batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'dasti_voucher_out', 'voucher_nature': txn_nature})
+            elif txn_nature == 'receive_cash':
+                batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                batch.set(db.collection('transactions').document(), {**base_txn, 'description': l_desc, 'type': 'dasti_voucher_in', 'voucher_nature': 'receive_cash'})
 
     batch.commit()
     return redirect(request.referrer or url_for('index'))
+
 
 
 @app.route('/demo_game')

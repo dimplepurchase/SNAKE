@@ -3302,4 +3302,4 @@ def delete_dasti_person(id):
     return redirect(url_for('dasti_ledger'))
 
 if __name__ == '__main__':
-    app.run(debug=True, use_reloader=False)
+    pass

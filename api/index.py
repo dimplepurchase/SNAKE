@@ -1497,8 +1497,8 @@ DASTI_ACCOUNT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dasti Account: {{ 
         </div>
         {% else %}
         <div class="card" style="padding: 40px; text-align: center; color: #6b7280; font-style: italic;">
-            <div style="font-size: 2em; margin-bottom: 10px;">🔒</div>
-            Individual entries are hidden by the admin's dashboard setting.<br>Totals above are still accurate.
+            <div style="font-size: 2em; margin-bottom: 10px;"></div>
+           
         </div>
         {% endif %}
     </div>

@@ -1551,6 +1551,33 @@ TEMP_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Temporary Entries</t
             <h2 style="margin: 0; font-size: 1.6em; color: #b45309;">⏳ Temporary (Pending) Entries</h2>
         </div>
         
+        <!-- 🚀 EXPRESS DIRECT ENTRY (TEMP BOOK) -->
+        <div class="express-entry no-print" style="margin-bottom: 25px;">
+            <h3 style="margin-top: 0; color: #b45309; font-size: 1.15em;">🚀 Express Direct Entry (Temp Book)</h3>
+            <form action="/add_express" method="POST" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <input type="hidden" name="source_page" value="{{ active_page }}">
+                <!-- FORCES STATUS TO PENDING BECAUSE NO APPROVER IS SENT -->
+                <input type="hidden" name="approved_by_select" value=""> 
+                
+                <input type="date" name="date" class="auto-date" id="temp_express_date" required style="flex: 1; min-width: 120px; border-color: #fcd34d;">
+                <input type="time" name="time" class="auto-time" id="temp_express_time" required style="flex: 1; min-width: 100px; border-color: #fcd34d;">
+                <input type="text" name="description" placeholder="Description / Reason" required style="flex: 2; min-width: 180px; border-color: #fcd34d;">
+                
+                <select name="category" required style="flex: 1; min-width: 130px; border-color: #fcd34d;">
+                    {% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}
+                </select>
+
+                <select name="type" required style="flex: 1; min-width: 120px; font-weight: bold; border-color: #fcd34d; color: #b45309;">
+                    <option value="income">➕ Cash In</option>
+                    {% if session.get('can_express_cashout') == 1 %}
+                    <option value="expense">➖ Cash Out</option>
+                    {% endif %}
+                </select>
+                <input type="number" step="0.01" min="0" name="amount" placeholder="Amount (₹)" value="0" required style="flex: 1; min-width: 110px; border-color: #fcd34d;">
+                <button class="btn" type="submit" style="flex: 1; min-width: 100px; background: #f59e0b; color: white;">⚡ Save Temp</button>
+            </form>
+        </div>
+
         <div class="stats-grid">
             <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Temp Receipts (+ IN)</h4><div class="value" style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in) }}</div></div>
             <div class="stat-card" style="border-top: 4px solid var(--danger);"><h4>Temp Payments (- OUT)</h4><div class="value" style="color: var(--danger);">- ₹{{ "{:,.2f}".format(total_out) }}</div></div>

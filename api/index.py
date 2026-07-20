@@ -472,7 +472,6 @@ TEMP_ENTRY_FORM_HTML = '''
     });
 </script>
 '''
-
 EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
         <div class="card" style="max-width: 850px; margin: 0 auto;">
@@ -493,7 +492,8 @@ EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BAS
                     <div style="background:#f0f9ff; border:1px solid #bae6fd; padding:15px; border-radius:8px; margin-bottom:15px;">
                         <h4 style="margin:0 0 15px 0; color:#0369a1;">🔀 Editing Split Voucher</h4>
                         <div class="flex-row">
-                            <div class="form-group flex-2" style="flex:2;"><label>Master Description / Bill No.</label><input type="text" name="description" value="{{ entry.description.split(' (')[0] }}" required></div>
+                            <!-- EXTRACRTS JUST THE MASTER DESCRIPTION AND IGNORES THE BREAKDOWN -->
+                            <div class="form-group flex-2" style="flex:2;"><label>Master Description / Bill No.</label><input type="text" name="description" value="{{ entry.description.split('\n')[0] }}" required></div>
                             <div class="form-group flex-1">
                                 <label style="color:red;">Total Amount (₹) <small>(Auto)</small></label>
                                 <input type="text" id="master_amount_display" readonly value="{{ '%.2f'|format(entry.amount) }}" style="border-color:red; font-weight:bold; background:#fef2f2; color:red;">
@@ -2049,6 +2049,7 @@ def index():
     firm_id = session['firm_id']
     
     time_filter = request.args.get('filter', 'all')
+    
     persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('persons').where('user_id', '==', firm_id).stream()]
     persons.sort(key=lambda x: x.get('name', ''))
     
@@ -2057,15 +2058,13 @@ def index():
     
     all_txns = []
     for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream():
-        data = doc.to_dict()
-        if data.get('type') in ('split_expense', 'split_income'):
-            continue
-        all_txns.append({'id': doc.id, **data})
+        all_txns.append({'id': doc.id, **doc.to_dict()})
         
     settings = get_global_settings()
     is_desc = (settings.get('dashboard_sort_order', 'desc') == 'desc')
     all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=is_desc)
 
+    # ALL transactions now calculate the Main Book metrics seamlessly
     now = datetime.now(IST)
     today_str = now.strftime('%Y-%m-%d')
     yesterday_str = (now - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -2077,11 +2076,10 @@ def index():
     total_in_actual = 0
     total_out_actual = 0
     
-    # REMOVED APPROVAL FILTER: Pending now impacts dashboard balances natively
     for r in all_txns:
         amt, d, ttype = float(r.get('amount', 0)), r.get('date', ''), r.get('type', '')
-        is_in = ttype in ('income', 'dasti_voucher_in')
-        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out', 'batch_ledger_out')
+        is_in = ttype in ('income', 'dasti_voucher_in', 'direct_in', 'split_income')
+        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out', 'batch_ledger_out', 'direct_out', 'split_expense')
         
         if is_in: total_in_actual += amt
         if is_out: total_out_actual += amt
@@ -2106,7 +2104,6 @@ def index():
     
     incomes = []
     expenses = []
-    
     for t in all_txns:
         d = t.get('date', '')
         if time_filter == 'today' and d != today_str: continue
@@ -2116,9 +2113,9 @@ def index():
         if time_filter == 'year' and not d.startswith(year_str): continue
         
         t_type = t.get('type')
-        if t_type in ('income', 'dasti_voucher_in', 'direct_in'):
+        if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in'):
             incomes.append(t)
-        elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out'):
+        elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out', 'split_master_out'):
             expenses.append(t)
 
     all_person_ledger = [doc.to_dict() for doc in db.collection('person_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
@@ -2128,8 +2125,8 @@ def index():
     total_dasti_ledger = 0.0
     dasti_breakdown = []
     
-    # REMOVED APPROVAL FILTER: Pending amounts now apply to Person Ledger balances natively
     for p in persons:
+        # ALL states (pending or approved) calculate into Person balance updates
         adv = sum(float(l.get('amount', 0)) for l in all_person_ledger if l.get('person_id') == p['id'] and l.get('type') == 'advance')
         setl = sum(float(l.get('amount', 0)) for l in all_person_ledger if l.get('person_id') == p['id'] and l.get('type') == 'settlement')
         owed = adv - setl
@@ -2140,9 +2137,8 @@ def index():
 
     total_outstanding_dasti = 0.0
     dasti_persons_breakdown = []
-    
-    # REMOVED APPROVAL FILTER: Pending amounts now apply to Dasti Ledger balances natively
     for dp in dasti_persons:
+        # ALL states (pending or approved) calculate into Dasti balance updates
         adv = sum(float(l.get('amount', 0)) for l in all_dasti_ledger if l.get('dasti_person_id') == dp['id'] and l.get('type') == 'advance')
         setl = sum(float(l.get('amount', 0)) for l in all_dasti_ledger if l.get('dasti_person_id') == dp['id'] and l.get('type') == 'settlement')
         owed = adv - setl
@@ -2167,11 +2163,10 @@ def index():
                 if not extracted.startswith('Split'):
                     acc_name = extracted
                     
-            is_in = t_type in ('income', 'dasti_voucher_in', 'direct_in')
-            if is_in:
+            if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_income'):
                 temp_in += amt
                 temp_acc_dict[acc_name] = temp_acc_dict.get(acc_name, 0) + amt
-            elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out'):
+            elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out', 'split_expense'):
                 temp_out += amt
                 temp_acc_dict[acc_name] = temp_acc_dict.get(acc_name, 0) - amt
 
@@ -2645,44 +2640,37 @@ def main_ledger():
     
     all_txns = []
     for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream():
-        data = doc.to_dict()
-        if data.get('type') in ('split_expense', 'split_income'):
-            continue
-        all_txns.append({'id': doc.id, **data})
+        all_txns.append({'id': doc.id, **doc.to_dict()})
         
     settings = get_global_settings()
     is_desc = (settings.get('dashboard_sort_order', 'desc') == 'desc')
     all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=is_desc)
 
-    # REMOVED APPROVAL FILTER
-    total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in'))
-    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'direct_out', 'batch_ledger_out'))
-    total_dasti = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') == 'dasti_out')
-    total_dasti_vouchers = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') == 'dasti_voucher_out')
+    total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in', 'split_income'))
+    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'direct_out', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'split_expense'))
     
-    balance = total_in - (total_out + total_dasti + total_dasti_vouchers)
-    return render_template_string(MAIN_LEDGER_TEMPLATE, txns=all_txns, balance=balance, total_in=total_in, total_out=total_out, total_dasti=total_dasti, total_dasti_vouchers=total_dasti_vouchers, username=session['username'], active_page='main_ledger')
+    balance = total_in - total_out
+    
+    display_txns = [t for t in all_txns if t.get('type') not in ('split_expense', 'split_income')]
+    return render_template_string(MAIN_LEDGER_TEMPLATE, txns=display_txns, balance=balance, total_in=total_in, total_out=total_out, total_dasti=0, total_dasti_vouchers=0, username=session['username'], active_page='main_ledger')
+
 @app.route('/dasti_ledger')
 def dasti_ledger():
     if 'user_id' not in session: return redirect(url_for('login'))
     firm_id = session['firm_id']
     
     all_txns = [doc.to_dict() for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
-    # REMOVED APPROVAL FILTER
-    total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in'))
-    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out', 'batch_ledger_out'))
+    total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in', 'split_income'))
+    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out', 'batch_ledger_out', 'split_expense'))
     main_balance = total_in - total_out
 
     dasti_persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('dasti_persons').where('user_id', '==', firm_id).stream()]
     dasti_persons.sort(key=lambda x: x.get('name', ''))
-    
     all_dasti_ledger = [doc.to_dict() for doc in db.collection('dasti_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     
     balances = []
     total_outstanding_dasti = 0.0
-    
     for p in dasti_persons:
-        # REMOVED APPROVAL FILTER
         adv = sum(float(l.get('amount', 0)) for l in all_dasti_ledger if l.get('dasti_person_id') == p['id'] and l.get('type') == 'advance')
         setl = sum(float(l.get('amount', 0)) for l in all_dasti_ledger if l.get('dasti_person_id') == p['id'] and l.get('type') == 'settlement')
         net = adv - setl
@@ -2694,7 +2682,6 @@ def dasti_ledger():
     all_person_ledger = [doc.to_dict() for doc in db.collection('person_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     total_person_ledger = 0.0
     for p in persons:
-        # REMOVED APPROVAL FILTER
         adv = sum(float(l.get('amount', 0)) for l in all_person_ledger if l.get('person_id') == p['id'] and l.get('type') == 'advance')
         setl = sum(float(l.get('amount', 0)) for l in all_person_ledger if l.get('person_id') == p['id'] and l.get('type') == 'settlement')
         owed = adv - setl
@@ -2702,8 +2689,8 @@ def dasti_ledger():
             total_person_ledger += owed
 
     total_ledger_outstanding = total_outstanding_dasti + total_person_ledger
-
     return render_template_string(DASTI_LEDGER_TEMPLATE, balances=balances, balance=main_balance, total_outstanding_dasti=total_outstanding_dasti, total_ledger_outstanding=total_ledger_outstanding, username=session['username'], active_page='dasti_ledger')
+
 
 @app.route('/dasti_account/<string:person_id>')
 def dasti_account(person_id):
@@ -2717,11 +2704,11 @@ def dasti_account(person_id):
     txns = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('dasti_ledger').where('dasti_person_id', '==', person_id).where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
     
-    # REMOVED APPROVAL FILTER
     advances = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'advance')
     settlements = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'settlement')
     
     return render_template_string(DASTI_ACCOUNT_TEMPLATE, person=person, txns=txns, balance=(advances - settlements), advances=advances, settlements=settlements, username=session['username'], active_page='dasti_ledger')
+
 
 @app.route('/edit_dasti_person/<string:id>')
 def edit_dasti_person(id):
@@ -2746,7 +2733,6 @@ def persons():
     balances = []
     total_person_ledger = 0.0
     for p in person_list:
-        # REMOVED APPROVAL FILTER
         adv = sum(float(l.get('amount', 0)) for l in all_person_ledger if l.get('person_id') == p['id'] and l.get('type') == 'advance')
         setl = sum(float(l.get('amount', 0)) for l in all_person_ledger if l.get('person_id') == p['id'] and l.get('type') == 'settlement')
         net = adv - setl
@@ -2755,16 +2741,14 @@ def persons():
             total_person_ledger += net
 
     all_txns = [doc.to_dict() for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
-    # REMOVED APPROVAL FILTER
-    total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in'))
-    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out', 'batch_ledger_out'))
+    total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in', 'split_income'))
+    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out', 'batch_ledger_out', 'split_expense'))
     main_balance = total_in - total_out
 
     dasti_persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('dasti_persons').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     all_dasti_ledger = [doc.to_dict() for doc in db.collection('dasti_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     total_dasti_outstanding = 0.0
     for dp in dasti_persons:
-        # REMOVED APPROVAL FILTER
         adv = sum(float(l.get('amount', 0)) for l in all_dasti_ledger if l.get('dasti_person_id') == dp['id'] and l.get('type') == 'advance')
         setl = sum(float(l.get('amount', 0)) for l in all_dasti_ledger if l.get('dasti_person_id') == dp['id'] and l.get('type') == 'settlement')
         owed = adv - setl
@@ -2787,11 +2771,11 @@ def person_account(person_id):
     txns = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('person_ledger').where('person_id', '==', person_id).where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
     
-    # REMOVED APPROVAL FILTER
     advances = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'advance')
     settlements = sum(float(t.get('amount', 0)) for t in txns if t.get('type') == 'settlement')
     
     return render_template_string(PERSON_ACCOUNT_TEMPLATE, person=person, txns=txns, balance=(advances - settlements), advances=advances, settlements=settlements, username=session['username'], active_page='persons')
+
 
 @app.route('/edit_person/<string:id>')
 def edit_person(id):
@@ -2882,7 +2866,7 @@ def reports():
         pid_filter = report_account.split('_')[1]
         pid_field = 'dasti_person_id'
         
-    # REMOVED APPROVAL FILTER FROM QUERY (.where('status', '==', 'approved'))
+    # Reports track total historical flow including pending status
     query = db.collection(collection_name).where('user_id', '==', firm_id).where('deleted', '==', 0)
     if pid_filter: query = query.where(pid_field, '==', pid_filter)
     
@@ -2930,7 +2914,6 @@ def export_reports():
         pid_filter = report_account.split('_')[1]
         pid_field = 'dasti_person_id'
         
-    # REMOVED APPROVAL FILTER FROM EXPORT QUERY
     query = db.collection(collection_name).where('user_id', '==', firm_id).where('deleted', '==', 0)
     if pid_filter: query = query.where(pid_field, '==', pid_filter)
     
@@ -3139,19 +3122,16 @@ def edit_entry(table_name, row_id):
     
     if has_link:
         master_txn = next((t for t in txn_docs if t.get('category') == 'Split Settlement'), None)
-        if master_txn and (len(txn_docs) + len(person_docs) + len(dasti_docs)) > 2:
+        if master_txn and (len(txn_docs) + len(person_docs) + len(dasti_docs)) > 1:
             is_split = True
             entry = master_txn
             for t in txn_docs:
                 if t['id'] != master_txn['id']:
-                    nat = 'slip_in' if t.get('type') == 'split_expense' else 'receive_cash'
-                    splits_data.append({'account': 'main', 'category': t.get('category'), 'amount': t.get('amount'), 'nature': nat})
+                    splits_data.append({'account': 'main', 'category': t.get('category'), 'amount': t.get('amount'), 'nature': t.get('voucher_nature', 'slip_in')})
             for p in person_docs:
-                nat = 'advance' if p.get('type') == 'advance' else ('receive_cash' if p.get('voucher_nature') == 'receive_cash' else 'slip_in')
-                splits_data.append({'account': f"person_{p.get('person_id')}", 'category': p.get('category'), 'amount': p.get('amount'), 'nature': nat})
+                splits_data.append({'account': f"person_{p.get('person_id')}", 'category': p.get('category'), 'amount': p.get('amount'), 'nature': p.get('voucher_nature', 'slip_in')})
             for d in dasti_docs:
-                nat = 'advance' if d.get('type') == 'advance' else ('receive_cash' if d.get('voucher_nature') == 'receive_cash' else 'slip_in')
-                splits_data.append({'account': f"dasti_{d.get('dasti_person_id')}", 'category': d.get('category'), 'amount': d.get('amount'), 'nature': nat})
+                splits_data.append({'account': f"dasti_{d.get('dasti_person_id')}", 'category': d.get('category'), 'amount': d.get('amount'), 'nature': d.get('voucher_nature', 'slip_in')})
 
     current_account_type, current_primary_id, current_nature = 'main', '', 'slip_in'
     if not is_split:
@@ -3169,7 +3149,6 @@ def edit_entry(table_name, row_id):
     dasti_persons = [{'id': d.id, **d.to_dict()} for d in db.collection('dasti_persons').where('user_id', '==', firm_id).stream()]
     dasti_persons.sort(key=lambda x: x.get('name', ''))
     
-    # --- FIX FOR APPROVAL PERSON MATCH ---
     user_approvers = [d.to_dict().get('username', '') for d in db.collection('users').where('firm_id', '==', firm_id).stream() if d.to_dict().get('can_approve') == 1]
     custom_approvers = get_approvers(firm_id)
     approver_names = list(set(user_approvers + custom_approvers))
@@ -3218,26 +3197,15 @@ def edit_entry(table_name, row_id):
                 for d in docs_list:
                     batch.delete(db.collection(coll).document(d['id']))
 
-            first_acc = valid_rows[0][2]
-            display_name = "Main"
-            if first_acc.startswith('person_'):
-                display_name = next((p['name'] for p in persons if p['id'] == first_acc.split('_')[1]), "Person")
-            elif first_acc.startswith('dasti_'):
-                display_name = next((d['name'] for d in dasti_persons if d['id'] == first_acc.split('_')[1]), "Dasti")
-            if len(valid_rows) > 1:
-                display_name += " & Others"
+            persons_dict = {p['id']: p['name'] for p in persons}
+            dasti_dict = {d['id']: d['name'] for d in dasti_persons}
+            
+            breakdown_lines = []
+            leg_ops = []
 
             has_out = any(r[1] in ('slip_in', 'advance') for r in valid_rows)
             has_in = any(r[1] == 'receive_cash' for r in valid_rows)
-            master_type = 'income' if (has_in and not has_out) else 'expense'
-
-            batch.set(db.collection('transactions').document(), {
-                'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode, 'category': 'Split Settlement',
-                'amount': master_amount, 'link_id': link_id, 'status': new_status, 'approved_by': approved_by,
-                'deleted': entry.get('deleted', 0), 'created_at': entry.get('created_at', time.time()),
-                'voucher_nature': 'direct_out' if master_type == 'expense' else 'direct_in', 'is_flagged': is_flagged,
-                'description': f"{master_desc} ({display_name})", 'type': master_type
-            })
+            master_type = 'split_master_in' if (has_in and not has_out) else 'split_master_out'
 
             for cat, txn_nature, account_raw, amt in valid_rows:
                 if cat not in existing_cats:
@@ -3252,30 +3220,36 @@ def edit_entry(table_name, row_id):
                 }
 
                 if account_raw == 'main':
+                    name = "Main Book"
                     leg_type = 'split_expense' if txn_nature in ('slip_in', 'advance') else 'split_income'
-                    batch.set(db.collection('transactions').document(), {
+                    leg_ops.append(('transactions', {
                         **base_txn, 'description': f"{master_desc} (Split-Gen)", 'type': leg_type, 'voucher_nature': txn_nature
-                    })
+                    }))
                 elif account_raw.startswith('person_'):
                     pid = account_raw.split('_')[1]
-                    p_name = next((p['name'] for p in persons if p['id'] == pid), "")
-                    l_desc = f"{master_desc} (Split: {p_name})"
-                    if txn_nature == 'slip_in':
-                        batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': 'settlement'})
-                    elif txn_nature == 'advance':
-                        batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': 'advance'})
-                    elif txn_nature == 'receive_cash':
-                        batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                    name = persons_dict.get(pid, 'Person')
+                    type_val = 'advance' if txn_nature == 'advance' else 'settlement'
+                    leg_ops.append(('person_ledger', {**base_txn, 'person_id': pid, 'description': f"{master_desc} (Split: {name})", 'type': type_val, 'voucher_nature': txn_nature}))
                 elif account_raw.startswith('dasti_'):
                     pid = account_raw.split('_')[1]
-                    p_name = next((d['name'] for d in dasti_persons if d['id'] == pid), "")
-                    l_desc = f"{master_desc} (Split: {p_name})"
-                    if txn_nature == 'slip_in':
-                        batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': 'settlement'})
-                    elif txn_nature == 'advance':
-                        batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': 'advance'})
-                    elif txn_nature == 'receive_cash':
-                        batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': 'settlement', 'voucher_nature': 'receive_cash'})
+                    name = dasti_dict.get(pid, 'Dasti')
+                    type_val = 'advance' if txn_nature == 'advance' else 'settlement'
+                    leg_ops.append(('dasti_ledger', {**base_txn, 'dasti_person_id': pid, 'description': f"{master_desc} (Split: {name})", 'type': type_val, 'voucher_nature': txn_nature}))
+                
+                breakdown_lines.append(f"↳ {name}: ₹{amt:,.2f}")
+
+            full_master_desc = f"{master_desc}\n" + "\n".join(breakdown_lines)
+
+            batch.set(db.collection('transactions').document(), {
+                'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode, 'category': 'Split Settlement',
+                'amount': master_amount, 'link_id': link_id, 'status': new_status, 'approved_by': approved_by,
+                'deleted': entry.get('deleted', 0), 'created_at': entry.get('created_at', time.time()),
+                'voucher_nature': 'direct_out' if master_type == 'split_master_out' else 'direct_in', 'is_flagged': is_flagged,
+                'description': full_master_desc, 'type': master_type
+            })
+            
+            for coll, data in leg_ops:
+                batch.set(db.collection(coll).document(), data)
 
             batch.set(db.collection('edit_logs').document(), {
                 'firm_id': firm_id, 'link_id': link_id, 'edited_by': session['username'],
@@ -3408,80 +3382,76 @@ def add_split_voucher():
     cats = request.form.getlist('category[]')
     amts = request.form.getlist('split_amount[]')
 
-    # Total is ALWAYS computed on the server from the rows the user filled in -
-    # never trust a client-supplied total.
     valid_rows = [(cats[i], natures[i], accounts[i], float(amts[i]))
                   for i in range(len(amts)) if amts[i].strip() and float(amts[i]) > 0]
     if not valid_rows:
         return redirect(request.referrer or url_for('index'))
     master_amount = sum(r[3] for r in valid_rows)
 
-    # Direction of the single combined entry: only "Receive Cash" rows mean money
-    # coming IN; if any row is Slip/Advance, the voucher counts as OUT.
     has_out = any(r[1] in ('slip_in', 'advance') for r in valid_rows)
     has_in = any(r[1] == 'receive_cash' for r in valid_rows)
-    master_type = 'income' if (has_in and not has_out) else 'expense'
-    master_nature = 'direct_in' if master_type == 'income' else 'direct_out'
+    
+    # ASSIGN SAFE MASTER TYPES THAT DO NOT AFFECT MAIN BALANCE MATH
+    master_type = 'split_master_in' if (has_in and not has_out) else 'split_master_out'
+    master_nature = 'direct_in' if master_type == 'split_master_in' else 'direct_out'
 
     existing_cats = get_categories(firm_id)
     batch = db.batch()
     shared_link_id = uuid.uuid4().hex[:12]
+    
+    persons_dict = {doc.id: doc.to_dict().get('name', '') for doc in db.collection('persons').where('user_id', '==', firm_id).stream()}
+    dasti_dict = {doc.id: doc.to_dict().get('name', '') for doc in db.collection('dasti_persons').where('user_id', '==', firm_id).stream()}
 
-    first_acc = valid_rows[0][2]
-    display_name = "Main"
-    if first_acc.startswith('person_'):
-        display_name = db.collection('persons').document(first_acc.split('_')[1]).get().to_dict().get('name', 'Person')
-    elif first_acc.startswith('dasti_'):
-        display_name = db.collection('dasti_persons').document(first_acc.split('_')[1]).get().to_dict().get('name', 'Dasti')
-    if len(valid_rows) > 1: display_name += " & Others"
-
-    # SINGLE combined entry - type is 'income'/'expense' like a normal transaction,
-    # so it is counted in the Main Cash Book balance AND shows as one line in the
-    # Payments/Receipts tables.
-    batch.set(db.collection('transactions').document(), {
-        'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode,
-        'category': 'Split Settlement', 'amount': master_amount, 'link_id': shared_link_id,
-        'status': 'approved' if approver else 'pending', 'approved_by': approver,
-        'deleted': 0, 'created_at': time.time(), 'voucher_nature': master_nature,
-        'description': f"{master_desc} ({display_name})", 'type': master_type
-    })
-
-    # Per-account breakdown legs - update each person/dasti account's own balance,
-    # and (for a 'main' row) a memo entry used only to rebuild the Edit screen.
-    # These are excluded from the Main Cash Book totals/lists so the voucher only
-    # ever shows once.
+    breakdown_lines = []
+    leg_ops = []
+    
     for cat, txn_nature, account_raw, amt in valid_rows:
         if cat not in existing_cats:
             db.collection('categories').add({'firm_id': firm_id, 'name': cat})
             existing_cats.append(cat)
 
         base_txn = {'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode,
-                     'category': cat, 'amount': amt, 'link_id': shared_link_id,
-                     'status': 'approved' if approver else 'pending', 'approved_by': approver,
-                     'deleted': 0, 'created_at': time.time(), 'is_flagged': 0}
+                    'category': cat, 'amount': amt, 'link_id': shared_link_id,
+                    'status': 'approved' if approver else 'pending', 'approved_by': approver,
+                    'deleted': 0, 'created_at': time.time(), 'is_flagged': 0}
 
         if account_raw == 'main':
-            batch.set(db.collection('transactions').document(), {
+            name = "Main Book"
+            # THIS LEG ACTUALLY DEDUCTS FROM MAIN BALANCE
+            leg_type = 'split_expense' if txn_nature in ('slip_in', 'advance') else 'split_income'
+            leg_ops.append(('transactions', {
                 **base_txn, 'description': f"{master_desc} (Split-Gen)",
-                'type': 'split_expense' if txn_nature in ('slip_in', 'advance') else 'split_income',
-                'voucher_nature': txn_nature
-            })
+                'type': leg_type, 'voucher_nature': txn_nature
+            }))
         elif account_raw.startswith('person_'):
             pid = account_raw.split('_')[1]
-            p_name = db.collection('persons').document(pid).get().to_dict().get('name', '')
-            l_desc = f"{master_desc} (Split: {p_name})"
+            name = persons_dict.get(pid, 'Person')
             type_val = 'advance' if txn_nature == 'advance' else 'settlement'
-            batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': pid, 'description': l_desc, 'type': type_val, 'voucher_nature': txn_nature})
+            leg_ops.append(('person_ledger', {**base_txn, 'person_id': pid, 'description': f"{master_desc} (Split: {name})", 'type': type_val, 'voucher_nature': txn_nature}))
         elif account_raw.startswith('dasti_'):
             pid = account_raw.split('_')[1]
-            p_name = db.collection('dasti_persons').document(pid).get().to_dict().get('name', '')
-            l_desc = f"{master_desc} (Split: {p_name})"
+            name = dasti_dict.get(pid, 'Dasti')
             type_val = 'advance' if txn_nature == 'advance' else 'settlement'
-            batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': pid, 'description': l_desc, 'type': type_val, 'voucher_nature': txn_nature})
+            leg_ops.append(('dasti_ledger', {**base_txn, 'dasti_person_id': pid, 'description': f"{master_desc} (Split: {name})", 'type': type_val, 'voucher_nature': txn_nature}))
+        
+        breakdown_lines.append(f"↳ {name}: ₹{amt:,.2f}")
+
+    full_master_desc = f"{master_desc}\n" + "\n".join(breakdown_lines)
+
+    # Master visually wrapper saves as split_master_out
+    batch.set(db.collection('transactions').document(), {
+        'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode,
+        'category': 'Split Settlement', 'amount': master_amount, 'link_id': shared_link_id,
+        'status': 'approved' if approver else 'pending', 'approved_by': approver,
+        'deleted': 0, 'created_at': time.time(), 'voucher_nature': master_nature,
+        'description': full_master_desc, 'type': master_type
+    })
+    
+    for coll, data in leg_ops:
+        batch.set(db.collection(coll).document(), data)
 
     batch.commit()
     return redirect(request.referrer or url_for('index'))
-
 
 @app.route('/demo_game')
 def demo_game():
@@ -3626,22 +3596,13 @@ def temp_ledger():
     if 'user_id' not in session: return redirect(url_for('login'))
     firm_id = session['firm_id']
     
-    # Query Persons and Dasti Persons for the Dropdowns in the Temp Form
     persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('persons').where('user_id', '==', firm_id).stream()]
-    persons.sort(key=lambda x: x.get('name', ''))
-    
     dasti_persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('dasti_persons').where('user_id', '==', firm_id).stream()]
-    dasti_persons.sort(key=lambda x: x.get('name', ''))
     
-    # Fetch ONLY pending/temporary entries
     all_txns = []
     for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).where('status', '==', 'pending').stream():
-        data = doc.to_dict()
-        if data.get('type') in ('split_expense', 'split_income'):
-            continue
-        all_txns.append({'id': doc.id, **data})
+        all_txns.append({'id': doc.id, **doc.to_dict()})
         
-    # Sort them
     settings = get_global_settings()
     is_desc = (settings.get('dashboard_sort_order', 'desc') == 'desc')
     all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=is_desc)
@@ -3651,21 +3612,25 @@ def temp_ledger():
     total_in = 0
     total_out = 0
     
-    # Split into Receipts vs Payments
     for t in all_txns:
         t_type = t.get('type')
         amt = float(t.get('amount', 0))
-        if t_type in ('income', 'dasti_voucher_in', 'direct_in'):
-            incomes.append(t)
+        
+        # Math calculation
+        if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_income'):
             total_in += amt
-        elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out'):
-            expenses.append(t)
+        elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out', 'split_expense'):
             total_out += amt
+            
+        # Display filtering
+        if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in'):
+            incomes.append(t)
+        elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out', 'split_master_out'):
+            expenses.append(t)
 
     balance = total_in - total_out
     cats = get_categories(firm_id)
     
-    # Render passing the persons and an empty account_balances dictionary (since temp form doesn't block negatives)
     return render_template_string(TEMP_LEDGER_TEMPLATE, incomes=incomes, expenses=expenses, total_in=total_in, total_out=total_out, balance=balance, categories=cats, persons=persons, dasti_persons=dasti_persons, account_balances="{}", username=session['username'], active_page='temp_ledger')
 
 if __name__ == '__main__':

@@ -421,15 +421,15 @@ ENTRY_FORM_HTML = '''
             <div class="form-group flex-1" style="min-width: 250px; margin-bottom: 0; flex: 2;">
                 <label id="primary_label" style="color: var(--primary);">Ledger Account</label>
                 <select name="primary_account" id="primary_account" onchange="checkNewAccount(this)" required style="border-color: var(--primary); font-weight: bold; background: white; font-size: 1.05em;">
-                    <option value="main" style="font-weight:bold;">🏢 Main Cash Book (Default)</option>
-                    <optgroup label="👥 Person Ledgers">
-                        {% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}'s Account</option>{% endfor %}
+                    <option value="main" style="font-weight:bold;">Main Cash Book (Default) 🏢</option>
+                    <optgroup label="Person Ledgers 👥">
+                        {% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} (Person) 👤</option>{% endfor %}
                     </optgroup>
-                    <optgroup label="💸 Dasti Accounts">
-                        {% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}'s Dasti</option>{% endfor %}
+                    <optgroup label="Dasti Accounts 💸">
+                        {% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} (Dasti) 💸</option>{% endfor %}
                     </optgroup>
-                    <option value="new_dasti" style="color: #0ea5e9; font-weight: bold;">➕ Create New Dasti Account...</option>
-                    <option value="new_person" style="color: var(--success); font-weight: bold;">➕ Create New Person Account...</option>
+                    <option value="new_dasti" style="color: #0ea5e9; font-weight: bold;">+ Create New Dasti Account...</option>
+                    <option value="new_person" style="color: var(--success); font-weight: bold;">+ Create New Person Account...</option>
                 </select>
                 <input type="text" name="new_account_name" id="new_account_name" placeholder="Type New Name Here..." style="display:none; margin-top: 8px; border-color: var(--primary); width: 100%;">
             </div>
@@ -518,15 +518,15 @@ TEMP_ENTRY_FORM_HTML = '''
             <div class="form-group flex-1" style="min-width: 250px; margin-bottom: 0; flex: 2;">
                 <label id="temp_primary_label" style="color: #b45309;">Ledger Account</label>
                 <select name="primary_account" id="temp_primary_account" onchange="checkNewTempAccount(this)" required style="border-color: #b45309; font-weight: bold; background: white; font-size: 1.05em;">
-                    <option value="main" style="font-weight:bold;">🏢 Main Cash Book (Default)</option>
-                    <optgroup label="👥 Person Ledgers">
-                        {% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}'s Account</option>{% endfor %}
+                    <option value="main" style="font-weight:bold;">Main Cash Book (Default) 🏢</option>
+                    <optgroup label="Person Ledgers 👥">
+                        {% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} (Person) 👤</option>{% endfor %}
                     </optgroup>
-                    <optgroup label="💸 Dasti Accounts">
-                        {% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}'s Dasti</option>{% endfor %}
+                    <optgroup label="Dasti Accounts 💸">
+                        {% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} (Dasti) 💸</option>{% endfor %}
                     </optgroup>
-                    <option value="new_dasti" style="color: #0ea5e9; font-weight: bold;">➕ Create New Dasti Account...</option>
-                    <option value="new_person" style="color: var(--success); font-weight: bold;">➕ Create New Person Account...</option>
+                    <option value="new_dasti" style="color: #0ea5e9; font-weight: bold;">+ Create New Dasti Account...</option>
+                    <option value="new_person" style="color: var(--success); font-weight: bold;">+ Create New Person Account...</option>
                 </select>
                 <input type="text" name="new_account_name" id="temp_new_account_name" placeholder="Type New Name Here..." style="display:none; margin-top: 8px; border-color: #b45309; width: 100%;">
             </div>
@@ -702,7 +702,7 @@ EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BAS
         
         <script>
             {% if is_split %}
-            const accountOpts = `<option value="main">🏢 Main Book</option><optgroup label="👥 Persons">{% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}</option>{% endfor %}</optgroup><optgroup label="💸 Dasti">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}</option>{% endfor %}</optgroup>`;
+            const accountOpts = `<option value="main">Main Book 🏢</option><optgroup label="Persons 👥">{% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} 👤</option>{% endfor %}</optgroup><optgroup label="Dasti 💸">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} 💸</option>{% endfor %}</optgroup>`;
             const catOpts = `{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}`;
             
             function addSplitRow() {
@@ -1030,7 +1030,7 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
     
     <script>
         const approverOpts = `<option value="">-- Req --</option>{% for u in approver_names %}<option value="{{u}}">{{u}}</option>{% endfor %}`;
-        const accountOpts = `<option value="main">🏢 Main Book</option><optgroup label="👥 Persons">{% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}</option>{% endfor %}</optgroup><optgroup label="💸 Dasti">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}</option>{% endfor %}</optgroup>`;
+        const accountOpts = `<option value="main">Main Book 🏢</option><optgroup label="Persons 👥">{% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} 👤</option>{% endfor %}</optgroup><optgroup label="Dasti 💸">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} 💸</option>{% endfor %}</optgroup>`;
         const catOpts = `{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}`;
         
         function addFastRow() {
@@ -1835,7 +1835,7 @@ TEMP_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Temporary Entries</t
     </div>
 
 <script>
-    const tempAccountOpts = `<option value="main">🏢 Main Book</option><optgroup label="👥 Persons">{% for p in persons %}<option value="person_{{ p.id }}">👤 {{ p.name }}</option>{% endfor %}</optgroup><optgroup label="💸 Dasti">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">💸 {{ dp.name }}</option>{% endfor %}</optgroup>`;
+    const tempAccountOpts = `<option value="main">Main Book 🏢</option><optgroup label="Persons 👥">{% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} 👤</option>{% endfor %}</optgroup><optgroup label="Dasti 💸">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} 💸</option>{% endfor %}</optgroup>`;
     const tempCatOpts = `{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}`;
     
     function addTempFastRow() {

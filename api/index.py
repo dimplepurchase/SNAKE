@@ -2425,7 +2425,7 @@ def index():
         t_type = t.get('type')
         if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in'):
             incomes.append(t)
-        elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out', 'split_master_out', 'settlement'):
+        elif t_type in ('expense', 'batch_ledger_out', 'direct_out', 'split_master_out'):
             expenses.append(t)
 
 
@@ -3968,7 +3968,7 @@ def temp_ledger():
             
         if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in'):
             incomes.append(t)
-        elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out', 'split_master_out'):
+        elif t_type in ('expense', 'batch_ledger_out', 'direct_out', 'split_master_out'):
             expenses.append(t)
 
     balance = total_in - total_out

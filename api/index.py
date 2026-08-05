@@ -269,7 +269,7 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print" style="background: l
     
     {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
     <a href="/flag_entries" class="{% if active_page == 'flags' %}active{% endif %}" style="color: #fdba74; font-weight: 800; font-size: 1.05em; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); background: rgba(253, 186, 116, 0.15);">🚩 Flags</a>
-    <a href="/bulk_edit_date" class="{% if active_page == 'bulk_date' %}active{% endif %}" style="color: #d8b4fe; font-weight: 800; font-size: 1.05em; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); background: rgba(216, 180, 254, 0.15);">📅 Bulk Date</a>
+    <a href="/bulk_edit_date" class="{% if active_page == 'bulk_date' %}active{% endif %}" style="color: #d8b4fe; font-weight: 800; font-size: 1.05em; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); background: rgba(216, 180, 254, 0.15);">📅 Bulk Entries Correcion</a>
     <a href="/logs" class="{% if active_page == 'logs' %}active{% endif %}" style="color: #a5b4fc; font-weight: 800; font-size: 1.05em; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); background: rgba(165, 180, 252, 0.15);">📝 Logs</a>
     {% endif %}
 
@@ -352,7 +352,6 @@ USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + 
         <button class="btn" type="submit" style="padding: 10px 25px; height: 45px; background:#0284c7; width: 100%;">💾 Save Global Settings</button>
     </form>
 </div>
-{% endif %}
 
 <div class="card" style="margin-bottom: 20px; padding: 20px; background: #f8fafc; border: 1px solid #cbd5e1;">
     <h3 style="font-size: 1.2em; color: #334155; margin-top: 0;">📁 / 📂 Financial Period Management</h3>
@@ -377,16 +376,20 @@ USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + 
     </div>
 </div>
 
-{% if session.get('role') == 'superadmin' %}
 <div class="card" style="margin-bottom: 20px; padding: 20px; background: #fdf4ff; border: 1px solid #e879f9;">
-    <h3 style="font-size: 1.2em; color: #a21caf; margin-top: 0;">🗄️ Database Maintenance (Re-Index)</h3>
-    <p style="font-size: 0.9em; color: #701a75; margin-bottom: 15px;">If vouchers are appearing out of order after bulk date edits, use this tool to re-calculate their chronological index based on their assigned Date and Time.</p>
-    <form action="/reindex_database" method="POST" onsubmit="return confirm('This will re-calculate the sorting index for ALL vouchers based on their dates. Proceed?');">
-        <button class="btn" type="submit" style="background:#c026d3; padding: 10px 25px;">🔄 Re-Index All Vouchers by Date & Time</button>
-    </form>
+    <h3 style="font-size: 1.2em; color: #a21caf; margin-top: 0;">🗄️ Database Maintenance & Auto-Fix Tool</h3>
+    <p style="font-size: 0.9em; color: #701a75; margin-bottom: 15px;">Use these tools to fix any broken or missing voucher tags, visibility problems, or sorting errors in your historical data.</p>
+    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+        <form action="/reindex_database" method="POST" onsubmit="return confirm('This will re-calculate the sorting index for ALL vouchers based on their dates. Proceed?');">
+            <button class="btn" type="submit" style="background:#c026d3; padding: 10px 20px;">🔄 1. Re-Index Dates & Time</button>
+        </form>
+        <form action="/fix_all_vouchers" method="POST" onsubmit="return confirm('This will scan every single voucher in your database and automatically fix missing Submit Slip/Bill labels, hide Advances, and correct any mistakes. Proceed?');">
+            <button class="btn" type="submit" style="background:#d946ef; padding: 10px 20px; box-shadow: 0 4px 6px rgba(217, 70, 239, 0.3);">🛠️ 2. Auto-Fix All Voucher Mistakes</button>
+        </form>
+    </div>
 </div>
 
-<!-- ADVANCED DATA CLEANUP NEW CARD -->
+<!-- ADVANCED DATA CLEANUP CARD -->
 <div class="card" style="margin-bottom: 20px; padding: 20px; background: #fff1f2; border: 1px solid #fda4af;">
     <h3 style="font-size: 1.2em; color: #be123c; margin-top: 0;">⚠️ Advanced Data Cleanup</h3>
     <p style="font-size: 0.9em; color: #9f1239; margin-bottom: 15px;">Access the secure wipe tool to permanently delete specific ledger categories, clear temp entries, or factory reset the firm.</p>
@@ -913,12 +916,15 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
                 <table style="width: 100%; font-size: 0.95em;">
                     <thead><tr><th style="width: 5%;">Sr.</th><th>Date</th><th>Mode/Cat</th><th>Detail</th><th style="text-align: right;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th class="no-print">Act</th>{% endif %}</tr></thead>
                     <tbody id="receipts-tbody">
-                    <!-- ALL entries are rendered, but JS controls the pagination pages -->
                     {% for t in incomes %}
                     <tr class="datarow">
                         <td style="color: #64748b; font-weight: bold;">{{ loop.index }}</td>
                         <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ t.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span></td>
+                        <td>
+                            <span class="badge badge-mode">{{ t.payment_mode }}</span><br>
+                            <span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span><br>
+                            <span style="font-size: 0.75em; color: #047857; font-weight: bold;">Cash Received</span>
+                        </td>
                         <td style="white-space: pre-wrap;">{{ t.description }}
                             {% if t.status == 'approved' and t.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ t.approved_by }}</span>{% endif %}
                             {% if t.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
@@ -934,7 +940,6 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
                     {% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No entries matching criteria.</td></tr>{% endfor %}
                     </tbody>
                 </table>
-                <!-- RESTORED PAGINATION BUTTONS -->
                 <div class="pagination-controls no-print" style="display: flex; justify-content: space-between; padding: 15px; background: #f8fafc; border-top: 1px solid var(--border);">
                     <button type="button" class="btn btn-outline btn-sm" onclick="prevReceipts()">← Previous</button>
                     <span id="receipt-page-info" style="font-size: 0.9em; font-weight: 500;">Page 1</span>
@@ -946,12 +951,15 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
                 <table style="width: 100%; font-size: 0.95em;">
                     <thead><tr><th style="width: 5%;">Sr.</th><th>Date</th><th>Mode/Cat</th><th>Detail</th><th style="text-align: right;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th class="no-print">Act</th>{% endif %}</tr></thead>
                     <tbody id="payments-tbody">
-                    <!-- ALL entries are rendered, but JS controls the pagination pages -->
                     {% for t in expenses %}
                     <tr class="datarow">
                         <td style="color: #64748b; font-weight: bold;">{{ loop.index }}</td>
                         <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ t.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span></td>
+                        <td>
+                            <span class="badge badge-mode">{{ t.payment_mode }}</span><br>
+                            <span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span><br>
+                            <span style="font-size: 0.75em; color: #be123c; font-weight: bold;">Submit Slip/Bill</span>
+                        </td>
                         <td style="white-space: pre-wrap;">{{ t.description }}
                             {% if t.status == 'approved' and t.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ t.approved_by }}</span>{% endif %}
                             {% if t.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
@@ -967,7 +975,6 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
                     {% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No entries matching criteria.</td></tr>{% endfor %}
                     </tbody>
                 </table>
-                <!-- RESTORED PAGINATION BUTTONS -->
                 <div class="pagination-controls no-print" style="display: flex; justify-content: space-between; padding: 15px; background: #f8fafc; border-top: 1px solid var(--border);">
                     <button type="button" class="btn btn-outline btn-sm" onclick="prevPayments()">← Previous</button>
                     <span id="payment-page-info" style="font-size: 0.9em; font-weight: 500;">Page 1</span>
@@ -1061,7 +1068,6 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
             }
         }
 
-        // --- NEW JAVASCRIPT FOR PAGINATION + SEARCH COMBINED ---
         let currentReceiptPage = 1;
         let currentPaymentPage = 1;
         const rowsPerPage = 10;
@@ -1071,17 +1077,14 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
             if(!tbody) return page;
             const allRows = Array.from(tbody.querySelectorAll('tr.datarow')); 
             
-            // Only paginate rows that are not hidden by the search
             const visibleRows = allRows.filter(r => !r.classList.contains('search-hidden'));
             
             const totalPages = Math.max(1, Math.ceil(visibleRows.length / rowsPerPage));
             if(page < 1) page = 1;
             if(page > totalPages) page = totalPages;
             
-            // Hide all rows initially
             allRows.forEach(r => r.style.display = 'none');
             
-            // Show only the correct 10 rows for this page
             visibleRows.forEach((row, index) => {
                 if(index >= (page-1)*rowsPerPage && index < page*rowsPerPage) {
                     row.style.display = '';
@@ -1108,7 +1111,6 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
                 }
             });
             
-            // Reset to page 1 and recalculate pagination with the filtered results
             currentReceiptPage = 1;
             currentPaymentPage = 1;
             renderTable('receipts-tbody', 1, 'receipt-page-info');
@@ -1537,17 +1539,29 @@ MAIN_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Ledge
                     </tr></thead>
                     <tbody>
                         {% for txn in txns %}
-                        <tr class="ledger-row" data-type="{% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'split_master_out', 'split_expense', 'direct_out'] %}out{% else %}in{% endif %}">
+                        <tr class="ledger-row" data-type="{% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'split_master_out', 'direct_out'] %}out{% else %}in{% endif %}">
                             <td style="padding-left: 25px;"><input type="checkbox" name="selected_links" value="{{ txn.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
                             <td style="font-weight: bold; color: #64748b;">{{ loop.index }}</td>
                             <td><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
-                            <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
+                            <td>
+                                <span class="badge badge-mode">{{ txn.payment_mode }}</span><br>
+                                <span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span>
+                                {% if txn.type in ['expense', 'batch_ledger_out', 'split_master_out', 'direct_out'] and txn.voucher_nature != 'advance' %}
+                                    <br><span style="font-size: 0.75em; color: #be123c; font-weight: bold;">Submit Slip/Bill</span>
+                                {% elif txn.type in ['advance', 'dasti_out', 'dasti_voucher_out'] or txn.voucher_nature == 'advance' %}
+                                    <br><span style="font-size: 0.75em; color: #0369a1; font-weight: bold;">Advance Payment</span>
+                                {% elif txn.type in ['income', 'direct_in', 'split_master_in'] and txn.voucher_nature != 'receive_cash' %}
+                                    <br><span style="font-size: 0.75em; color: #047857; font-weight: bold;">Cash Received</span>
+                                {% elif txn.type in ['settlement', 'dasti_voucher_in'] or txn.voucher_nature == 'receive_cash' %}
+                                    <br><span style="font-size: 0.75em; color: #047857; font-weight: bold;">Transfer In</span>
+                                {% endif %}
+                            </td>
                             <td style="white-space: pre-wrap;">{{ txn.description }}
                                 {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
                             </td>
                             <td style="text-align: right;">
                                 {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
-                                {% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out'] %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>({% if txn.type == 'dasti_out' %}Transfer Out{% elif txn.type == 'batch_ledger_out' %}Ledger Slip Out{% elif txn.type == 'dasti_voucher_out' %}Dasti Advance Out{% else %}Payment Out{% endif %})</small></span>
+                                {% if txn.type in ['expense', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'split_master_out'] %}<span class="badge badge-out">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>({% if txn.type == 'dasti_out' %}Transfer Out{% elif txn.type == 'batch_ledger_out' %}Ledger Slip Out{% elif txn.type == 'dasti_voucher_out' %}Dasti Advance Out{% else %}Payment Out{% endif %})</small></span>
                                 {% else %}<span class="badge badge-in">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Receipt/In)</small></span>{% endif %}
                             </td>
                             {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
@@ -1771,7 +1785,11 @@ TEMP_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Temporary Entries</t
                     <tr class="datarow">
                         <td style="color: #64748b; font-weight: bold;">{{ loop.index }}</td>
                         <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ t.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span></td>
+                        <td>
+                            <span class="badge badge-mode">{{ t.payment_mode }}</span><br>
+                            <span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span><br>
+                            <span style="font-size: 0.75em; color: #047857; font-weight: bold;">Cash Received</span>
+                        </td>
                         <td style="white-space: pre-wrap;">{{ t.description }}
                             {% if t.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
                         </td>
@@ -1785,7 +1803,6 @@ TEMP_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Temporary Entries</t
                     </tr>{% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No temporary receipts.</td></tr>{% endfor %}
                     </tbody>
                 </table>
-                <!-- RESTORED PAGINATION BUTTONS -->
                 <div class="pagination-controls no-print" style="display: flex; justify-content: space-between; padding: 15px; background: #f8fafc; border-top: 1px solid var(--border);">
                     <button type="button" class="btn btn-outline btn-sm" onclick="prevReceipts()">← Previous</button>
                     <span id="receipt-page-info" style="font-size: 0.9em; font-weight: 500;">Page 1</span>
@@ -1801,7 +1818,11 @@ TEMP_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Temporary Entries</t
                     <tr class="datarow">
                         <td style="color: #64748b; font-weight: bold;">{{ loop.index }}</td>
                         <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                        <td><span class="badge badge-mode">{{ t.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span></td>
+                        <td>
+                            <span class="badge badge-mode">{{ t.payment_mode }}</span><br>
+                            <span style="font-size: 0.85em; color: #4b5563;">{{ t.category }}</span><br>
+                            <span style="font-size: 0.75em; color: #be123c; font-weight: bold;">Submit Slip/Bill</span>
+                        </td>
                         <td style="white-space: pre-wrap;">{{ t.description }}
                             {% if t.is_flagged == 1 %}<br><span style="color: #f59e0b; font-size: 0.85em; font-weight: 600;">🚩 Flagged</span>{% endif %}
                         </td>
@@ -1815,7 +1836,6 @@ TEMP_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Temporary Entries</t
                     </tr>{% else %}<tr><td colspan="6" style="text-align: center; color: #9ca3af; padding: 40px 0;">No temporary payments.</td></tr>{% endfor %}
                     </tbody>
                 </table>
-                <!-- RESTORED PAGINATION BUTTONS -->
                 <div class="pagination-controls no-print" style="display: flex; justify-content: space-between; padding: 15px; background: #f8fafc; border-top: 1px solid var(--border);">
                     <button type="button" class="btn btn-outline btn-sm" onclick="prevPayments()">← Previous</button>
                     <span id="payment-page-info" style="font-size: 0.9em; font-weight: 500;">Page 1</span>
@@ -1876,17 +1896,14 @@ TEMP_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Temporary Entries</t
         if(!tbody) return page;
         const allRows = Array.from(tbody.querySelectorAll('tr.datarow')); 
         
-        // Only paginate rows that are not hidden by the search
         const visibleRows = allRows.filter(r => !r.classList.contains('search-hidden'));
         
         const totalPages = Math.max(1, Math.ceil(visibleRows.length / rowsPerPage));
         if(page < 1) page = 1;
         if(page > totalPages) page = totalPages;
         
-        // Hide all rows initially
         allRows.forEach(r => r.style.display = 'none');
         
-        // Show only the correct 10 rows for this page
         visibleRows.forEach((row, index) => {
             if(index >= (page-1)*rowsPerPage && index < page*rowsPerPage) {
                 row.style.display = '';
@@ -2380,13 +2397,20 @@ def index():
     total_in_actual = 0
     total_out_actual = 0
     
+    # Identify Master Links to prevent double-counting new split vouchers
+    master_links = {tx.get('link_id') for tx in all_txns if tx.get('type') in ('split_master_out', 'split_master_in')}
+    
     # MATH: Balances calculated using ALL time
     for r in all_txns:
         amt, d, ttype = float(r.get('amount', 0)), r.get('date', ''), r.get('type', '')
-        # FIXED MATH: Using split_master_in and split_master_out
-        is_in = ttype in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in')
-        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out', 'batch_ledger_out', 'direct_out', 'split_master_out')
-
+        
+        # Skip child math if Master exists to prevent double-deduction!
+        if ttype in ('split_expense', 'split_income') and r.get('link_id') in master_links:
+            continue
+        
+        is_in = ttype in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in', 'split_income')
+        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement')
+        
         if is_in: total_in_actual += amt
         if is_out: total_out_actual += amt
             
@@ -2423,11 +2447,18 @@ def index():
         if time_filter == 'year' and not d.startswith(year_str): continue
         
         t_type = t.get('type')
-        if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in'):
+        
+        # Hide child split legs if a master exists to prevent visual duplicates
+        if t_type in ('split_expense', 'split_income') and t.get('link_id') in master_links:
+            continue
+        
+        # INCOMES: Only append regular cash-ins. IGNORE 'receive_cash'
+        if t_type in ('income', 'direct_in', 'split_master_in', 'split_income') and t.get('voucher_nature') != 'receive_cash':
             incomes.append(t)
-        elif t_type in ('expense', 'batch_ledger_out', 'direct_out', 'split_master_out'):
+            
+        # EXPENSES: Only append Slips/Bills. IGNORE 'advance'
+        elif t_type in ('expense', 'batch_ledger_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement') and t.get('voucher_nature') != 'advance':
             expenses.append(t)
-
 
     all_person_ledger = [doc.to_dict() for doc in db.collection('person_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     all_dasti_ledger = [doc.to_dict() for doc in db.collection('dasti_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
@@ -2466,16 +2497,20 @@ def index():
             t_type = t.get('type')
             desc = t.get('description', '')
             
+            # Skip double math for pending child splits
+            if t_type in ('split_expense', 'split_income') and t.get('link_id') in master_links:
+                continue
+            
             acc_name = 'Main Book'
             if '(' in desc and ')' in desc:
                 extracted = desc.split('(')[1].split(')')[0]
                 if not extracted.startswith('Split'):
                     acc_name = extracted
                     
-            if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_income'):
+            if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in', 'split_income'):
                 temp_in += amt
                 temp_acc_dict[acc_name] = temp_acc_dict.get(acc_name, 0) + amt
-            elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out', 'split_expense'):
+            elif t_type in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement'):
                 temp_out += amt
                 temp_acc_dict[acc_name] = temp_acc_dict.get(acc_name, 0) - amt
 
@@ -2486,7 +2521,6 @@ def index():
     approver_names = get_approvers(firm_id)
     
     return render_template_string(INDEX_TEMPLATE, persons=persons, dasti_persons=dasti_persons, incomes=incomes, expenses=expenses, balance=main_balance, temp_balance=temp_balance, total_outstanding_dasti=total_outstanding_dasti, account_balances=json.dumps(acc_bals), total_dasti=total_dasti_ledger, dasti_breakdown=dasti_breakdown, dasti_persons_breakdown=dasti_persons_breakdown, temp_breakdown=temp_breakdown, categories=cats, approver_names=approver_names, s_d_in=s_d_in, s_d_out=s_d_out, s_yest_in=s_yest_in, s_yest_out=s_yest_out, s_w_in=s_w_in, s_w_out=s_w_out, s_m_in=s_m_in, s_m_out=s_m_out, s_y_in=s_y_in, s_y_out=s_y_out, active_filter=time_filter, username=session['username'], active_page='home')
-
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -2648,8 +2682,7 @@ def add_fast_unified():
                 
             link_id = uuid.uuid4().hex[:12]
             final_nature = txn_nature
-            if account_type == 'main':
-                final_nature = 'direct_in' if txn_nature == 'receive_cash' else 'direct_out'
+            
                 
             # ⏱️ VISUAL TIME FIX: Increment exactly +5 seconds per row
             row_time_dt = base_time_dt + timedelta(seconds=(i * 5))
@@ -2751,7 +2784,7 @@ def add_batch_unified():
                 
             link_id = uuid.uuid4().hex[:12]
             final_nature = txn_nature
-            if account_type == 'main': final_nature = 'direct_in' if txn_nature == 'receive_cash' else 'direct_out'
+            
                 
             # ⏱️ VISUAL TIME FIX: +5 seconds
             row_time_dt = base_time_dt + timedelta(seconds=(i * 5))
@@ -2987,14 +3020,28 @@ def main_ledger():
     is_desc = (settings.get('dashboard_sort_order', 'desc') == 'desc')
     all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=is_desc)
 
-    # FIXED MATH
-    total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in'))
-    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'direct_out', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'split_master_out'))
+    master_links = {tx.get('link_id') for tx in all_txns if tx.get('type') in ('split_master_out', 'split_master_in')}
 
+    total_in = 0
+    total_out = 0
+    for t in all_txns:
+        ttype = t.get('type')
+        if ttype in ('split_expense', 'split_income') and t.get('link_id') in master_links:
+            continue
+        if ttype in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in', 'split_income'):
+            total_in += float(t.get('amount', 0))
+        elif ttype in ('expense', 'direct_out', 'dasti_out', 'dasti_voucher_out', 'split_master_out', 'split_expense', 'settlement'):
+            total_out += float(t.get('amount', 0))
+            
     balance = total_in - total_out
     
-    # 📅 FILTERS VIEW BY WORKING MONTH/YEAR
-    display_txns = [t for t in all_txns if t.get('type') not in ('split_expense', 'split_income') and is_in_period(session, t.get('date', ''))]
+    # DISPLAY: Filter logic
+    display_txns = []
+    for t in all_txns:
+        if not is_in_period(session, t.get('date', '')): continue
+        if t.get('type') in ('split_expense', 'split_income') and t.get('link_id') in master_links: continue
+        display_txns.append(t)
+        
     return render_template_string(MAIN_LEDGER_TEMPLATE, txns=display_txns, balance=balance, total_in=total_in, total_out=total_out, total_dasti=0, total_dasti_vouchers=0, username=session['username'], active_page='main_ledger')
 
 @app.route('/dasti_ledger')
@@ -3651,7 +3698,8 @@ def edit_entry(table_name, row_id):
 
             if current_account_type != new_account_type: changes.append(f"Ledger Mode: {current_account_type} ➔ {new_account_type}")
 
-            base_txn = {'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode, 'category': category, 'amount': amount, 'link_id': link_id, 'status': new_status, 'approved_by': approved_by, 'deleted': entry.get('deleted', 0), 'created_at': entry.get('created_at', time.time()), 'is_flagged': is_flagged, 'voucher_nature': new_nature if new_account_type != 'main' else ('direct_in' if new_nature == 'receive_cash' else 'direct_out')}
+            base_txn = {'user_id': firm_id, 'date': date_val, 'time': time_val, 'payment_mode': mode, 'category': category, 'amount': amount, 'link_id': link_id, 'status': new_status, 'approved_by': approved_by, 'deleted': entry.get('deleted', 0), 'created_at': entry.get('created_at', time.time()), 'is_flagged': is_flagged, 'voucher_nature': new_nature}
+
 
             for coll, docs_list in linked_docs.items():
                 for d in docs_list: batch.delete(db.collection(coll).document(d['id']))
@@ -3949,6 +3997,8 @@ def temp_ledger():
     is_desc = (settings.get('dashboard_sort_order', 'desc') == 'desc')
     all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=is_desc)
 
+    master_links = {tx.get('link_id') for tx in all_txns if tx.get('type') in ('split_master_out', 'split_master_in')}
+
     incomes = []
     expenses = []
     total_in = 0
@@ -3958,17 +4008,20 @@ def temp_ledger():
         t_type = t.get('type')
         amt = float(t.get('amount', 0))
         
-        if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_income'):
-            total_in += amt
-        elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'advance', 'direct_out', 'split_expense'):
-            total_out += amt
+        # MATH Logic
+        if t_type not in ('split_expense', 'split_income') or t.get('link_id') not in master_links:
+            if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in', 'split_income'):
+                total_in += amt
+            elif t_type in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement'):
+                total_out += amt
             
-        # 📅 FILTERS VIEW BY WORKING MONTH/YEAR
+        # DISPLAY Logic
         if not is_in_period(session, t.get('date', '')): continue
+        if t_type in ('split_expense', 'split_income') and t.get('link_id') in master_links: continue
             
-        if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in'):
+        if t_type in ('income', 'direct_in', 'split_master_in', 'split_income') and t.get('voucher_nature') != 'receive_cash':
             incomes.append(t)
-        elif t_type in ('expense', 'batch_ledger_out', 'direct_out', 'split_master_out'):
+        elif t_type in ('expense', 'batch_ledger_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement') and t.get('voucher_nature') != 'advance':
             expenses.append(t)
 
     balance = total_in - total_out
@@ -4214,6 +4267,148 @@ def execute_mass_delete():
     })
 
     return redirect(url_for('data_cleanup'))
+
+@app.route('/reconcile_data', methods=['POST'])
+def reconcile_data():
+    if 'user_id' not in session or session.get('role') != 'superadmin':
+        return redirect(url_for('index'))
+    
+    firm_id = session['firm_id']
+    batch = db.batch()
+    update_count = 0
+    
+    def commit_if_full():
+        nonlocal batch, update_count
+        if update_count >= 400:
+            batch.commit()
+            batch = db.batch()
+            update_count = 0
+
+    # 1. Fix Main Transactions
+    docs = db.collection('transactions').where('user_id', '==', firm_id).stream()
+    for d in docs:
+        data = d.to_dict()
+        t_type = data.get('type', '')
+        current_nature = data.get('voucher_nature', '')
+        new_nature = current_nature
+        
+        if t_type in ['expense', 'batch_ledger_out', 'direct_out', 'split_master_out']:
+            new_nature = 'slip_in'
+        elif t_type in ['dasti_out', 'dasti_voucher_out']:
+            new_nature = 'advance'
+        elif t_type in ['dasti_voucher_in']:
+            new_nature = 'receive_cash'
+        elif t_type in ['income', 'direct_in', 'split_master_in'] and current_nature != 'receive_cash':
+            new_nature = 'direct_in'
+                
+        if new_nature != current_nature:
+            batch.update(d.reference, {'voucher_nature': new_nature})
+            update_count += 1
+            commit_if_full()
+
+    # 2. Fix Person Ledgers
+    p_docs = db.collection('person_ledger').where('user_id', '==', firm_id).stream()
+    for d in p_docs:
+        data = d.to_dict()
+        t_type = data.get('type', '')
+        current_nature = data.get('voucher_nature', '')
+        
+        new_nature = 'slip_in' if t_type == 'settlement' else 'advance'
+        if current_nature == 'receive_cash': new_nature = 'receive_cash'
+        
+        if new_nature != current_nature:
+            batch.update(d.reference, {'voucher_nature': new_nature})
+            update_count += 1
+            commit_if_full()
+
+    # 3. Fix Dasti Ledgers
+    d_docs = db.collection('dasti_ledger').where('user_id', '==', firm_id).stream()
+    for d in d_docs:
+        data = d.to_dict()
+        t_type = data.get('type', '')
+        current_nature = data.get('voucher_nature', '')
+        
+        new_nature = 'slip_in' if t_type == 'settlement' else 'advance'
+        if current_nature == 'receive_cash': new_nature = 'receive_cash'
+        
+        if new_nature != current_nature:
+            batch.update(d.reference, {'voucher_nature': new_nature})
+            update_count += 1
+            commit_if_full()
+            
+    if update_count > 0:
+        batch.commit()
+
+    db.collection('edit_logs').add({
+        'firm_id': firm_id, 'link_id': 'system_action', 'edited_by': session['username'],
+        'changes': f"🛠️ Executed Data Reconciliation", 'details': "Fixed missing/incorrect tags for historical visibility.",
+        'timestamp': int(time.time() * 1000), 'date_formatted': datetime.now(IST).strftime('%d-%b-%Y %I:%M %p')
+    })
+
+    return redirect(url_for('manage_users'))
+@app.route('/fix_all_vouchers', methods=['POST'])
+def fix_all_vouchers():
+    if 'user_id' not in session or session.get('role') != 'superadmin':
+        return redirect(url_for('index'))
+    
+    firm_id = session['firm_id']
+    batch = db.batch()
+    update_count = 0
+    
+    def commit_if_full():
+        nonlocal batch, update_count
+        if update_count >= 400:
+            batch.commit()
+            batch = db.batch()
+            update_count = 0
+
+    docs = db.collection('transactions').where('user_id', '==', firm_id).stream()
+    for d in docs:
+        data = d.to_dict()
+        t_type = data.get('type', '')
+        current_nature = data.get('voucher_nature', '')
+        new_nature = current_nature
+        
+        # FORCE EVERY EXPENSE-LIKE THING TO slip_in SO IT SHOWS UP IN RED TEXT
+        if t_type in ['expense', 'batch_ledger_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement']:
+            new_nature = 'slip_in'
+        elif t_type in ['dasti_out', 'dasti_voucher_out', 'advance']:
+            new_nature = 'advance'
+        elif t_type in ['dasti_voucher_in']:
+            new_nature = 'receive_cash'
+        elif t_type in ['income', 'direct_in', 'split_master_in', 'split_income'] and current_nature != 'receive_cash':
+            new_nature = 'direct_in'
+                
+        if new_nature != current_nature:
+            batch.update(d.reference, {'voucher_nature': new_nature})
+            update_count += 1
+            commit_if_full()
+
+    # Also force Person and Dasti ledgers to correct formatting
+    for collection in ['person_ledger', 'dasti_ledger']:
+        ledger_docs = db.collection(collection).where('user_id', '==', firm_id).stream()
+        for d in ledger_docs:
+            data = d.to_dict()
+            t_type = data.get('type', '')
+            current_nature = data.get('voucher_nature', '')
+            new_nature = 'slip_in' if t_type == 'settlement' else 'advance'
+            if current_nature == 'receive_cash': new_nature = 'receive_cash'
+            
+            if new_nature != current_nature:
+                batch.update(d.reference, {'voucher_nature': new_nature})
+                update_count += 1
+                commit_if_full()
+                
+    if update_count > 0:
+        batch.commit()
+
+    db.collection('edit_logs').add({
+        'firm_id': firm_id, 'link_id': 'system_action', 'edited_by': session['username'],
+        'changes': f"🛠️ Executed DEEP Data Reconciliation", 'details': "Restored missing 100+ legacy entries.",
+        'timestamp': int(time.time() * 1000), 'date_formatted': datetime.now(IST).strftime('%d-%b-%Y %I:%M %p')
+    })
+
+    return redirect(url_for('manage_users'))
 
 if __name__ == '__main__':
     pass

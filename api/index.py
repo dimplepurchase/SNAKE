@@ -2398,21 +2398,18 @@ def index():
     s_d_in = s_d_out = s_yest_in = s_yest_out = s_w_in = s_w_out = s_m_in = s_m_out = s_y_in = s_y_out = 0
     total_in_actual = 0
     total_out_actual = 0
-    
-    # Identify Master Links to prevent double-counting new split vouchers
-    master_links = {tx.get('link_id') for tx in all_txns if tx.get('type') in ('split_master_out', 'split_master_in')}
-    
     # MATH: Balances calculated using ALL time
     for r in all_txns:
         amt, d, ttype = float(r.get('amount', 0)), r.get('date', ''), r.get('type', '')
         
-        # Skip child math if Master exists to prevent double-deduction!
-        if ttype in ('split_expense', 'split_income') and r.get('link_id') in master_links:
+        # FIX: Completely ignore the total 'Master' sum. Only calculate the specific assigned legs.
+        if ttype in ('split_master_out', 'split_master_in'):
             continue
         
-        is_in = ttype in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in', 'split_income')
-        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement')
-        
+        is_in = ttype in ('income', 'dasti_voucher_in', 'direct_in', 'split_income')
+        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_expense', 'settlement')
+
+
         if is_in: total_in_actual += amt
         if is_out: total_out_actual += amt
             
@@ -2453,8 +2450,8 @@ def index():
         
         t_type = t.get('type')
         
-        # Hide child split legs if a master exists to prevent visual duplicates
-        if t_type in ('split_expense', 'split_income') and t.get('link_id') in master_links:
+        # FIX: Hide the lump-sum Master entry from the tables, show the specific accounts instead
+        if t_type in ('split_master_out', 'split_master_in'):
             continue
             
         if table_filter_mode == 'all':
@@ -2508,8 +2505,8 @@ def index():
             t_type = t.get('type')
             desc = t.get('description', '')
             
-            # Skip double math for pending child splits
-            if t_type in ('split_expense', 'split_income') and t.get('link_id') in master_links:
+            # FIX: Skip the total lump sum completely. Calculate only individual legs.
+            if t_type in ('split_master_out', 'split_master_in'):
                 continue
             
             acc_name = 'Main Book'
@@ -2518,12 +2515,13 @@ def index():
                 if not extracted.startswith('Split'):
                     acc_name = extracted
                     
-            if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in', 'split_income'):
+            if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_income'):
                 temp_in += amt
                 temp_acc_dict[acc_name] = temp_acc_dict.get(acc_name, 0) + amt
-            elif t_type in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement'):
+            elif t_type in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_expense', 'settlement'):
                 temp_out += amt
                 temp_acc_dict[acc_name] = temp_acc_dict.get(acc_name, 0) - amt
+
 
     temp_balance = temp_in - temp_out
     temp_breakdown = [{'name': k, 'amount': v} for k, v in temp_acc_dict.items() if v != 0]
@@ -3032,17 +3030,17 @@ def main_ledger():
     is_desc = (settings.get('dashboard_sort_order', 'desc') == 'desc')
     all_txns.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=is_desc)
 
-    master_links = {tx.get('link_id') for tx in all_txns if tx.get('type') in ('split_master_out', 'split_master_in')}
-
     total_in = 0
     total_out = 0
     for t in all_txns:
         ttype = t.get('type')
-        if ttype in ('split_expense', 'split_income') and t.get('link_id') in master_links:
+        # FIX: Ignore master totals, only count assigned rows
+        if ttype in ('split_master_out', 'split_master_in'):
             continue
-        if ttype in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in', 'split_income'):
+            
+        if ttype in ('income', 'dasti_voucher_in', 'direct_in', 'split_income'):
             total_in += float(t.get('amount', 0))
-        elif ttype in ('expense', 'direct_out', 'dasti_out', 'dasti_voucher_out', 'split_master_out', 'split_expense', 'settlement'):
+        elif ttype in ('expense', 'direct_out', 'dasti_out', 'dasti_voucher_out', 'split_expense', 'settlement'):
             total_out += float(t.get('amount', 0))
             
     balance = total_in - total_out
@@ -3051,7 +3049,7 @@ def main_ledger():
     display_txns = []
     for t in all_txns:
         if not is_in_period(session, t.get('date', '')): continue
-        if t.get('type') in ('split_expense', 'split_income') and t.get('link_id') in master_links: continue
+        if t.get('type') in ('split_master_out', 'split_master_in'): continue # Hide Master Lump Sum
         display_txns.append(t)
         
     return render_template_string(MAIN_LEDGER_TEMPLATE, txns=display_txns, balance=balance, total_in=total_in, total_out=total_out, total_dasti=0, total_dasti_vouchers=0, username=session['username'], active_page='main_ledger')
@@ -3276,7 +3274,7 @@ def reports():
     query = db.collection(collection_name).where('user_id', '==', firm_id).where('deleted', '==', 0)
     if pid_filter: query = query.where(pid_field, '==', pid_filter)
     
-    raw_results = [doc.to_dict() for doc in query.stream() if doc.to_dict().get('type') not in ('split_expense', 'split_income')]
+    raw_results = [doc.to_dict() for doc in query.stream() if doc.to_dict().get('type') not in ('split_master_out', 'split_master_in')]
     
     results = []
     for r in raw_results:
@@ -3323,7 +3321,7 @@ def export_reports():
     query = db.collection(collection_name).where('user_id', '==', firm_id).where('deleted', '==', 0)
     if pid_filter: query = query.where(pid_field, '==', pid_filter)
     
-    raw_results = [doc.to_dict() for doc in query.stream() if doc.to_dict().get('type') not in ('split_expense', 'split_income')]
+    raw_results = [doc.to_dict() for doc in query.stream() if doc.to_dict().get('type') not in ('split_master_out', 'split_master_in')]
     
     
     results = []
@@ -4020,12 +4018,13 @@ def temp_ledger():
         t_type = t.get('type')
         amt = float(t.get('amount', 0))
         
-        # MATH Logic
-        if t_type not in ('split_expense', 'split_income') or t.get('link_id') not in master_links:
-            if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in', 'split_income'):
-                total_in += amt
-            elif t_type in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement'):
-                total_out += amt
+        # MATH Logic - Ignore master totals, only count assigned rows
+        if t_type in ('split_master_out', 'split_master_in'):
+            pass # Skip the master lump sum completely
+        elif t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_income'):
+            total_in += amt
+        elif t_type in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_expense', 'settlement'):
+            total_out += amt
             
         # DISPLAY Logic
         if not is_in_period(session, t.get('date', '')): continue
@@ -4423,4 +4422,4 @@ def fix_all_vouchers():
     return redirect(url_for('manage_users'))
 
 if __name__ == '__main__':
-    pass
+    app.run(debug=True, use_reloader=False)

@@ -51,7 +51,8 @@ def get_global_settings():
         'edit_action_mode': 'button',
         'report_flag_mode': 'both',
         'report_pdf_format': 'standard',
-        'dashboard_sort_order': 'desc'
+        'dashboard_sort_order': 'desc',
+        'dashboard_table_filter': 'strict' # <-- ADD THIS LINE
     }
 
 def update_closed_balance_status():
@@ -347,7 +348,8 @@ USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + 
         <div class="form-group flex-1" style="min-width: 200px;"><label>Edit Action Mode</label><select name="edit_action_mode" required><option value="button" {% if sys_settings.edit_action_mode == 'button' %}selected{% endif %}>Visible Button</option><option value="tap" {% if sys_settings.edit_action_mode == 'tap' %}selected{% endif %}>Direct Tap</option></select></div>
         <div class="form-group flex-1" style="min-width: 200px;"><label>Report Flag Filter</label><select name="report_flag_mode" required><option value="both" {% if sys_settings.report_flag_mode == 'both' %}selected{% endif %}>Show All Entries</option><option value="flagged" {% if sys_settings.report_flag_mode == 'flagged' %}selected{% endif %}>Flagged Only</option><option value="unflagged" {% if sys_settings.report_flag_mode == 'unflagged' %}selected{% endif %}>Unflagged Only</option></select></div>
         <div class="form-group flex-1" style="min-width: 200px;"><label>Report PDF Format</label><select name="report_pdf_format" required><option value="standard" {% if sys_settings.report_pdf_format == 'standard' %}selected{% endif %}>Standard Detail</option><option value="summary_breakdown" {% if sys_settings.report_pdf_format == 'summary_breakdown' %}selected{% endif %}>Summary Breakdown</option></select></div>
-        <div class="form-group flex-1" style="min-width: 200px;"><label>Dashboard Ledger Sort</label><select name="dashboard_sort_order" required style="border-color:#38bdf8; font-weight:bold;"><option value="desc" {% if sys_settings.dashboard_sort_order == 'desc' %}selected{% endif %}>Newest First (Desc) ⬇️</option><option value="asc" {% if sys_settings.dashboard_sort_order == 'asc' %}selected{% endif %}>Oldest First (Asc) ⬆️</option></select></div>
+        <div class="form-group flex-1" style="min-width: 200px;"><label>Main Table Display Filter</label><select name="dashboard_table_filter" required style="border-color:#4f46e5; font-weight:bold;"><option value="strict" {% if sys_settings.dashboard_table_filter == 'strict' %}selected{% endif %}>Strict (Hide Advances & Settlements)</option><option value="all" {% if sys_settings.dashboard_table_filter == 'all' %}selected{% endif %}>Show All (Include Everything)</option></select></div>
+
         
         <button class="btn" type="submit" style="padding: 10px 25px; height: 45px; background:#0284c7; width: 100%;">💾 Save Global Settings</button>
     </form>
@@ -2435,6 +2437,9 @@ def index():
     incomes = []
     expenses = []
     
+    # Grab the user's display preference
+    table_filter_mode = settings.get('dashboard_table_filter', 'strict')
+
     # DISPLAY: Tables filtered by "Closing" Period dynamically
     for t in all_txns:
         d = t.get('date', '')
@@ -2451,14 +2456,20 @@ def index():
         # Hide child split legs if a master exists to prevent visual duplicates
         if t_type in ('split_expense', 'split_income') and t.get('link_id') in master_links:
             continue
-        
-        # INCOMES: Only append regular cash-ins. IGNORE 'receive_cash'
-        if t_type in ('income', 'direct_in', 'split_master_in', 'split_income') and t.get('voucher_nature') != 'receive_cash':
-            incomes.append(t)
             
-        # EXPENSES: Only append Slips/Bills. IGNORE 'advance'
-        elif t_type in ('expense', 'batch_ledger_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement') and t.get('voucher_nature') != 'advance':
-            expenses.append(t)
+        if table_filter_mode == 'all':
+            # MODE: SHOW ALL (Put everything in the tables based solely on direction)
+            if t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_master_in', 'split_income'):
+                incomes.append(t)
+            elif t_type in ('expense', 'batch_ledger_out', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement'):
+                expenses.append(t)
+        else:
+            # MODE: STRICT (Hide person advances and person cash settlements)
+            if t_type in ('income', 'direct_in', 'split_master_in', 'split_income') and t.get('voucher_nature') != 'receive_cash':
+                incomes.append(t)
+            elif t_type in ('expense', 'batch_ledger_out', 'direct_out', 'split_master_out', 'split_expense', 'settlement') and t.get('voucher_nature') != 'advance':
+                expenses.append(t)
+                
 
     all_person_ledger = [doc.to_dict() for doc in db.collection('person_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     all_dasti_ledger = [doc.to_dict() for doc in db.collection('dasti_ledger').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
@@ -2589,10 +2600,11 @@ def update_settings():
         'edit_action_mode': request.form.get('edit_action_mode', 'button'),
         'report_flag_mode': request.form.get('report_flag_mode', 'both'),
         'report_pdf_format': request.form.get('report_pdf_format', 'standard'),
-        'dashboard_sort_order': request.form.get('dashboard_sort_order', 'desc')
+        'dashboard_sort_order': request.form.get('dashboard_sort_order', 'desc'),
+        'dashboard_table_filter': request.form.get('dashboard_table_filter', 'strict') # <-- ADD THIS LINE
     }, merge=True)
     return redirect(url_for('manage_users'))
-
+    
 @app.route('/reindex_database', methods=['POST'])
 def reindex_database():
     if 'user_id' not in session or session.get('role') != 'superadmin': 

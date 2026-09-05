@@ -1099,14 +1099,20 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
     
     <script>
         const approverOpts = `<option value="">-- Req --</option>{% for u in approver_names %}<option value="{{u}}">{{u}}</option>{% endfor %}<option value="new_approver">➕ New...</option>`;
-        const accountOpts = `<option value="main">Main Book 🏢</option><optgroup label="Persons 👥">{% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} 👤</option>{% endfor %}</optgroup><optgroup label="Dasti 💸">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} 💸</option>{% endfor %}</optgroup>`;
+        const accountOpts = `<option value="main">Main Book 🏢</option><optgroup label="Persons 👥">{% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} 👤</option>{% endfor %}</optgroup><optgroup label="Dasti 💸">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} 💸</option>{% endfor %}</optgroup><option value="new_person">➕ New Person...</option><option value="new_dasti">➕ New Dasti...</option>`;
         const catOpts = `{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}<option value="Other">➕ Other...</option>`;
         
         function addFastRow() {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td style="padding:5px;"><select name="txn_nature[]" required style="font-size:0.85em; padding:6px; font-weight:bold;"><option value="slip_in" style="color:red;">➖ Slip/Bill</option><option value="advance" style="color:blue;">📤 Advance</option><option value="receive_cash" style="color:green;">📥 Receive Cash</option></select></td>
-                <td style="padding:5px;"><select name="primary_account[]" required style="font-size:0.85em; padding:6px; font-weight:bold;">${accountOpts}</select></td>
+                <td style="padding:5px;">
+                    <select name="primary_account[]" required style="font-size:0.85em; padding:6px; font-weight:bold; width:100%; box-sizing:border-box;" onchange="
+                        if(this.value==='new_person' || this.value==='new_dasti'){ this.nextElementSibling.style.display='block'; this.nextElementSibling.required=true; } 
+                        else { this.nextElementSibling.style.display='none'; this.nextElementSibling.required=false; }
+                    ">${accountOpts}</select>
+                    <input type="text" name="new_account_name[]" placeholder="Type Account Name" style="display:none; margin-top:4px; font-size:0.85em; padding:6px; width:100%; box-sizing:border-box;">
+                </td>
                 <td style="padding:5px;">
                     <select name="approved_by_select[]" required style="font-size:0.85em; padding:6px; background:#e0e7ff; width:100%; box-sizing:border-box;" onchange="
                         if(this.value==='new_approver'){ this.nextElementSibling.style.display='block'; this.nextElementSibling.required=true; } 
@@ -1220,7 +1226,13 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td style="padding:8px;"><select name="txn_nature[]" required style="font-size:0.9em; padding:8px; font-weight:bold;"><option value="slip_in" style="color:red;">➖ Slip/Bill (Debit)</option><option value="advance" style="color:blue;">📤 Advance (Credit)</option><option value="receive_cash" style="color:green;">📥 Receive Cash (Credit)</option></select></td>
-                <td style="padding:8px;"><select name="primary_account[]" required style="font-size:0.9em; padding:8px; font-weight:bold;">${accountOpts}</select></td>
+                <td style="padding:8px;">
+                    <select name="primary_account[]" required style="font-size:0.9em; padding:8px; font-weight:bold; width:100%; box-sizing:border-box;" onchange="
+                        if(this.value==='new_person' || this.value==='new_dasti'){ this.nextElementSibling.style.display='block'; this.nextElementSibling.required=true; } 
+                        else { this.nextElementSibling.style.display='none'; this.nextElementSibling.required=false; }
+                    ">${accountOpts}</select>
+                    <input type="text" name="new_account_name[]" placeholder="Type Account Name" style="display:none; margin-top:4px; font-size:0.85em; padding:8px; width:100%; box-sizing:border-box;">
+                </td>
                 <td style="padding:8px;">
                     <select name="category[]" required style="font-size:0.9em; padding:8px; width:100%; box-sizing:border-box;" onchange="
                         if(this.value==='Other'){ this.nextElementSibling.style.display='block'; this.nextElementSibling.required=true; } 
@@ -2027,14 +2039,20 @@ TEMP_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Temporary Entries</t
     </div>
 
 <script>
-    const tempAccountOpts = `<option value="main">Main Book 🏢</option><optgroup label="Persons 👥">{% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} 👤</option>{% endfor %}</optgroup><optgroup label="Dasti 💸">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} 💸</option>{% endfor %}</optgroup>`;
+    const tempAccountOpts = `<option value="main">Main Book 🏢</option><optgroup label="Persons 👥">{% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} 👤</option>{% endfor %}</optgroup><optgroup label="Dasti 💸">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} 💸</option>{% endfor %}</optgroup><option value="new_person">➕ New Person...</option><option value="new_dasti">➕ New Dasti...</option>`;
     const tempCatOpts = `{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}<option value="Other">➕ Other...</option>`;
     
     function addTempFastRow() {
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td style="padding:5px;"><select name="txn_nature[]" required style="font-size:0.85em; padding:6px; font-weight:bold;"><option value="slip_in" style="color:red;">➖ Slip/Bill</option><option value="advance" style="color:blue;">📤 Advance</option><option value="receive_cash" style="color:green;">📥 Receive Cash</option></select></td>
-            <td style="padding:5px;"><select name="primary_account[]" required style="font-size:0.85em; padding:6px; font-weight:bold;">${tempAccountOpts}</select></td>
+            <td style="padding:5px;">
+                <select name="primary_account[]" required style="font-size:0.85em; padding:6px; font-weight:bold; width:100%; box-sizing:border-box;" onchange="
+                    if(this.value==='new_person' || this.value==='new_dasti'){ this.nextElementSibling.style.display='block'; this.nextElementSibling.required=true; } 
+                    else { this.nextElementSibling.style.display='none'; this.nextElementSibling.required=false; }
+                ">${tempAccountOpts}</select>
+                <input type="text" name="new_account_name[]" placeholder="Type Account Name" style="display:none; margin-top:4px; font-size:0.85em; padding:6px; width:100%; box-sizing:border-box;">
+            </td>
             <!-- HIDDEN APPROVER FIELD FORCES PENDING -->
             <input type="hidden" name="approved_by_select[]" value="">
             <td style="padding:5px;">
@@ -3291,6 +3309,7 @@ def add_fast_unified():
         
     natures = request.form.getlist('txn_nature[]')
     accounts = request.form.getlist('primary_account[]')
+    new_accounts = request.form.getlist('new_account_name[]')
     approvers = request.form.getlist('approved_by_select[]')
     new_approvers = request.form.getlist('new_approver_name[]')
     cats = request.form.getlist('category[]')
@@ -3324,15 +3343,24 @@ def add_fast_unified():
                     
             txn_status = 'approved' if approver else 'pending'
             
+            # DYNAMIC ACCOUNT CREATION LOGIC
             account_type, primary_id, person_name = 'main', None, ''
-            if account_raw.startswith('person_'):
+            if account_raw == 'new_person':
+                person_name = new_accounts[i].strip() if i < len(new_accounts) else f"Person {i}"
+                new_ref = db.collection('persons').document()
+                batch.set(new_ref, {'user_id': firm_id, 'name': person_name, 'deleted': 0})
+                primary_id, account_type = new_ref.id, 'person'
+            elif account_raw == 'new_dasti':
+                person_name = new_accounts[i].strip() if i < len(new_accounts) else f"Dasti {i}"
+                new_ref = db.collection('dasti_persons').document()
+                batch.set(new_ref, {'user_id': firm_id, 'name': person_name, 'deleted': 0})
+                primary_id, account_type = new_ref.id, 'dasti'
+            elif account_raw.startswith('person_'):
                 primary_id = account_raw.split('_')[1]
                 account_type = 'person'
-                person_name = db.collection('persons').document(primary_id).get().to_dict().get('name', '')
             elif account_raw.startswith('dasti_'):
                 primary_id = account_raw.split('_')[1]
                 account_type = 'dasti'
-                person_name = db.collection('dasti_persons').document(primary_id).get().to_dict().get('name', '')
                 
             link_id = uuid.uuid4().hex[:12]
             final_nature = txn_nature
@@ -4378,22 +4406,24 @@ def add_split_voucher():
             
     natures = request.form.getlist('txn_nature[]')
     accounts = request.form.getlist('primary_account[]')
+    new_accounts = request.form.getlist('new_account_name[]')
     cats = request.form.getlist('category[]')
     cust_cats = request.form.getlist('custom_category[]')
     amts = request.form.getlist('split_amount[]')
 
-    # CUSTOM CATEGORY LOGIC 
+    # DYNAMIC DATA GATHERING
     valid_rows = []
     for i in range(len(amts)):
         if amts[i].strip() and float(amts[i]) > 0:
             cat_val = cats[i]
             custom_cat_val = cust_cats[i].strip() if i < len(cust_cats) and cust_cats[i] else ''
             final_cat = custom_cat_val if cat_val == 'Other' and custom_cat_val else cat_val
-            valid_rows.append((final_cat, natures[i], accounts[i], float(amts[i])))
+            new_acc_name = new_accounts[i].strip() if i < len(new_accounts) else ''
+            valid_rows.append((final_cat, natures[i], accounts[i], new_acc_name, float(amts[i])))
 
     if not valid_rows:
         return redirect(request.referrer or url_for('index'))
-    master_amount = sum(r[3] for r in valid_rows)
+    master_amount = sum(r[4] for r in valid_rows)
 
     has_out = any(r[1] in ('slip_in', 'advance') for r in valid_rows)
     has_in = any(r[1] == 'receive_cash' for r in valid_rows)
@@ -4407,7 +4437,7 @@ def add_split_voucher():
     
     leg_ops = []
     
-    for cat, txn_nature, account_raw, amt in valid_rows:
+    for cat, txn_nature, account_raw, new_acc_name, amt in valid_rows:
         if cat not in existing_cats:
             db.collection('categories').add({'firm_id': firm_id, 'name': cat})
             existing_cats.append(cat)
@@ -4423,6 +4453,18 @@ def add_split_voucher():
                 **base_txn, 'description': master_desc, 
                 'type': leg_type, 'voucher_nature': txn_nature
             }))
+        elif account_raw == 'new_person':
+            new_ref = db.collection('persons').document()
+            batch.set(new_ref, {'user_id': firm_id, 'name': new_acc_name, 'deleted': 0})
+            pid = new_ref.id
+            type_val = 'advance' if txn_nature == 'advance' else 'settlement'
+            leg_ops.append(('person_ledger', {**base_txn, 'person_id': pid, 'description': master_desc, 'type': type_val, 'voucher_nature': txn_nature}))
+        elif account_raw == 'new_dasti':
+            new_ref = db.collection('dasti_persons').document()
+            batch.set(new_ref, {'user_id': firm_id, 'name': new_acc_name, 'deleted': 0})
+            pid = new_ref.id
+            type_val = 'advance' if txn_nature == 'advance' else 'settlement'
+            leg_ops.append(('dasti_ledger', {**base_txn, 'dasti_person_id': pid, 'description': master_desc, 'type': type_val, 'voucher_nature': txn_nature}))
         elif account_raw.startswith('person_'):
             pid = account_raw.split('_')[1]
             type_val = 'advance' if txn_nature == 'advance' else 'settlement'
@@ -4448,6 +4490,7 @@ def add_split_voucher():
 
     batch.commit()
     return redirect(request.referrer or url_for('index'))
+
 # --- NEW DIRECT BUILD ROUTES ---
 @app.route('/add_approver', methods=['POST'])
 def add_approver():

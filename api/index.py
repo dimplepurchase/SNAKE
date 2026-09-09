@@ -1099,20 +1099,14 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
     
     <script>
         const approverOpts = `<option value="">-- Req --</option>{% for u in approver_names %}<option value="{{u}}">{{u}}</option>{% endfor %}<option value="new_approver">➕ New...</option>`;
-        const accountOpts = `<option value="main">Main Book 🏢</option><optgroup label="Persons 👥">{% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} 👤</option>{% endfor %}</optgroup><optgroup label="Dasti 💸">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} 💸</option>{% endfor %}</optgroup><option value="new_person">➕ New Person...</option><option value="new_dasti">➕ New Dasti...</option>`;
+        const accountOpts = `<option value="main">Main Book 🏢</option><optgroup label="Persons 👥">{% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} 👤</option>{% endfor %}</optgroup><optgroup label="Dasti 💸">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} 💸</option>{% endfor %}</optgroup>`;
         const catOpts = `{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}<option value="Other">➕ Other...</option>`;
         
         function addFastRow() {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td style="padding:5px;"><select name="txn_nature[]" required style="font-size:0.85em; padding:6px; font-weight:bold;"><option value="slip_in" style="color:red;">➖ Slip/Bill</option><option value="advance" style="color:blue;">📤 Advance</option><option value="receive_cash" style="color:green;">📥 Receive Cash</option></select></td>
-                <td style="padding:5px;">
-                    <select name="primary_account[]" required style="font-size:0.85em; padding:6px; font-weight:bold; width:100%; box-sizing:border-box;" onchange="
-                        if(this.value==='new_person' || this.value==='new_dasti'){ this.nextElementSibling.style.display='block'; this.nextElementSibling.required=true; } 
-                        else { this.nextElementSibling.style.display='none'; this.nextElementSibling.required=false; }
-                    ">${accountOpts}</select>
-                    <input type="text" name="new_account_name[]" placeholder="Type Account Name" style="display:none; margin-top:4px; font-size:0.85em; padding:6px; width:100%; box-sizing:border-box;">
-                </td>
+                <td style="padding:5px;"><select name="primary_account[]" required style="font-size:0.85em; padding:6px; font-weight:bold;">${accountOpts}</select></td>
                 <td style="padding:5px;">
                     <select name="approved_by_select[]" required style="font-size:0.85em; padding:6px; background:#e0e7ff; width:100%; box-sizing:border-box;" onchange="
                         if(this.value==='new_approver'){ this.nextElementSibling.style.display='block'; this.nextElementSibling.required=true; } 
@@ -1226,13 +1220,7 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td style="padding:8px;"><select name="txn_nature[]" required style="font-size:0.9em; padding:8px; font-weight:bold;"><option value="slip_in" style="color:red;">➖ Slip/Bill (Debit)</option><option value="advance" style="color:blue;">📤 Advance (Credit)</option><option value="receive_cash" style="color:green;">📥 Receive Cash (Credit)</option></select></td>
-                <td style="padding:8px;">
-                    <select name="primary_account[]" required style="font-size:0.9em; padding:8px; font-weight:bold; width:100%; box-sizing:border-box;" onchange="
-                        if(this.value==='new_person' || this.value==='new_dasti'){ this.nextElementSibling.style.display='block'; this.nextElementSibling.required=true; } 
-                        else { this.nextElementSibling.style.display='none'; this.nextElementSibling.required=false; }
-                    ">${accountOpts}</select>
-                    <input type="text" name="new_account_name[]" placeholder="Type Account Name" style="display:none; margin-top:4px; font-size:0.85em; padding:8px; width:100%; box-sizing:border-box;">
-                </td>
+                <td style="padding:8px;"><select name="primary_account[]" required style="font-size:0.9em; padding:8px; font-weight:bold;">${accountOpts}</select></td>
                 <td style="padding:8px;">
                     <select name="category[]" required style="font-size:0.9em; padding:8px; width:100%; box-sizing:border-box;" onchange="
                         if(this.value==='Other'){ this.nextElementSibling.style.display='block'; this.nextElementSibling.required=true; } 
@@ -2039,20 +2027,14 @@ TEMP_LEDGER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Temporary Entries</t
     </div>
 
 <script>
-    const tempAccountOpts = `<option value="main">Main Book 🏢</option><optgroup label="Persons 👥">{% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} 👤</option>{% endfor %}</optgroup><optgroup label="Dasti 💸">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} 💸</option>{% endfor %}</optgroup><option value="new_person">➕ New Person...</option><option value="new_dasti">➕ New Dasti...</option>`;
+    const tempAccountOpts = `<option value="main">Main Book 🏢</option><optgroup label="Persons 👥">{% for p in persons %}<option value="person_{{ p.id }}">{{ p.name }} 👤</option>{% endfor %}</optgroup><optgroup label="Dasti 💸">{% for dp in dasti_persons %}<option value="dasti_{{ dp.id }}">{{ dp.name }} 💸</option>{% endfor %}</optgroup>`;
     const tempCatOpts = `{% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}<option value="Other">➕ Other...</option>`;
     
     function addTempFastRow() {
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td style="padding:5px;"><select name="txn_nature[]" required style="font-size:0.85em; padding:6px; font-weight:bold;"><option value="slip_in" style="color:red;">➖ Slip/Bill</option><option value="advance" style="color:blue;">📤 Advance</option><option value="receive_cash" style="color:green;">📥 Receive Cash</option></select></td>
-            <td style="padding:5px;">
-                <select name="primary_account[]" required style="font-size:0.85em; padding:6px; font-weight:bold; width:100%; box-sizing:border-box;" onchange="
-                    if(this.value==='new_person' || this.value==='new_dasti'){ this.nextElementSibling.style.display='block'; this.nextElementSibling.required=true; } 
-                    else { this.nextElementSibling.style.display='none'; this.nextElementSibling.required=false; }
-                ">${tempAccountOpts}</select>
-                <input type="text" name="new_account_name[]" placeholder="Type Account Name" style="display:none; margin-top:4px; font-size:0.85em; padding:6px; width:100%; box-sizing:border-box;">
-            </td>
+            <td style="padding:5px;"><select name="primary_account[]" required style="font-size:0.85em; padding:6px; font-weight:bold;">${tempAccountOpts}</select></td>
             <!-- HIDDEN APPROVER FIELD FORCES PENDING -->
             <input type="hidden" name="approved_by_select[]" value="">
             <td style="padding:5px;">
@@ -3056,18 +3038,17 @@ def index():
     total_in_actual = 0
     total_out_actual = 0
     
-    # Identify all master splits to power the Visual Combine feature
     master_links = {tx.get('link_id') for tx in all_txns if tx.get('type') in ('split_master_in', 'split_master_out')}
 
     for r in all_txns:
         amt, d, ttype = float(r.get('amount', 0)), r.get('date', ''), r.get('type', '')
         
-        # MATH: Ignore the visual 'Master' sum. Only calculate the specific assigned legs to prevent double counting.
-        if ttype in ('split_master_out', 'split_master_in'):
+        # MATH: Ignore Master Split sums AND Slips (batch_ledger_out) to prevent double counting cash
+        if ttype in ('split_master_out', 'split_master_in', 'batch_ledger_out'):
             continue
         
         is_in = ttype in ('income', 'dasti_voucher_in', 'direct_in', 'split_income')
-        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_expense', 'settlement', 'batch_ledger_out')
+        is_out = ttype in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_expense', 'settlement')
 
         if is_in: total_in_actual += amt
         if is_out: total_out_actual += amt
@@ -3106,7 +3087,6 @@ def index():
         
         t_type = t.get('type')
         
-        # 🔀 VISUAL COMBINE: If part of a split, ONLY show the combined Master. Hide the legs.
         if t.get('link_id') in master_links:
             if t_type not in ('split_master_out', 'split_master_in'):
                 continue
@@ -3159,7 +3139,7 @@ def index():
             t_type = t.get('type')
             desc = t.get('description', '')
             
-            if t_type in ('split_master_out', 'split_master_in'):
+            if t_type in ('split_master_out', 'split_master_in', 'batch_ledger_out'):
                 continue
             
             acc_name = 'Main Book'
@@ -3182,6 +3162,7 @@ def index():
     approver_names = get_approvers(firm_id)
     
     return render_template_string(INDEX_TEMPLATE, persons=persons, dasti_persons=dasti_persons, incomes=incomes, expenses=expenses, balance=main_balance, temp_balance=temp_balance, total_outstanding_dasti=total_outstanding_dasti, account_balances=json.dumps(acc_bals), total_dasti=total_dasti_ledger, dasti_breakdown=dasti_breakdown, dasti_persons_breakdown=dasti_persons_breakdown, temp_breakdown=temp_breakdown, categories=cats, approver_names=approver_names, s_d_in=s_d_in, s_d_out=s_d_out, s_yest_in=s_yest_in, s_yest_out=s_yest_out, s_w_in=s_w_in, s_w_out=s_w_out, s_m_in=s_m_in, s_m_out=s_m_out, s_y_in=s_y_in, s_y_out=s_y_out, active_filter=time_filter, username=session['username'], active_page='home')
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -3325,7 +3306,6 @@ def add_fast_unified():
         if amts[i].strip() and float(amts[i]) >= 0:
             amt, desc = float(amts[i]), descs[i].strip()
             
-            # CUSTOM CATEGORY LOGIC
             custom_cat_val = cust_cats[i].strip() if i < len(cust_cats) and cust_cats[i] else ''
             cat = custom_cat_val if cats[i] == 'Other' and custom_cat_val else cats[i]
             if cat not in existing_cats:
@@ -3343,8 +3323,7 @@ def add_fast_unified():
                     
             txn_status = 'approved' if approver else 'pending'
             
-            # DYNAMIC ACCOUNT CREATION LOGIC
-            account_type, primary_id, person_name = 'main', None, ''
+            account_type, primary_id = 'main', None
             if account_raw == 'new_person':
                 person_name = new_accounts[i].strip() if i < len(new_accounts) else f"Person {i}"
                 new_ref = db.collection('persons').document()
@@ -3382,6 +3361,7 @@ def add_fast_unified():
             elif account_type == 'person':
                 if txn_nature == 'slip_in':
                     batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'batch_ledger_out'})
                 elif txn_nature == 'advance':
                     batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'advance'})
                     batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'dasti_out'})
@@ -3392,6 +3372,7 @@ def add_fast_unified():
             elif account_type == 'dasti':
                 if txn_nature == 'slip_in':
                     batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'batch_ledger_out'})
                 elif txn_nature == 'advance':
                     batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'advance'})
                     batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'dasti_voucher_out'})
@@ -3479,6 +3460,7 @@ def add_batch_unified():
             elif account_type == 'person':
                 if txn_nature == 'slip_in':
                     batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'batch_ledger_out'})
                 elif txn_nature == 'advance':
                     batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': primary_id, 'description': desc, 'type': 'advance'})
                     batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'dasti_out'})
@@ -3488,6 +3470,7 @@ def add_batch_unified():
             elif account_type == 'dasti':
                 if txn_nature == 'slip_in':
                     batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'batch_ledger_out'})
                 elif txn_nature == 'advance':
                     batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': primary_id, 'description': desc, 'type': 'advance'})
                     batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'dasti_voucher_out'})
@@ -3618,13 +3601,12 @@ def main_ledger():
     total_out = 0
     for t in all_txns:
         ttype = t.get('type')
-        # MATH: Ignore master totals
-        if ttype in ('split_master_out', 'split_master_in'):
+        if ttype in ('split_master_out', 'split_master_in', 'batch_ledger_out'):
             continue
             
         if ttype in ('income', 'dasti_voucher_in', 'direct_in', 'split_income'):
             total_in += float(t.get('amount', 0))
-        elif ttype in ('expense', 'direct_out', 'dasti_out', 'dasti_voucher_out', 'split_expense', 'settlement', 'batch_ledger_out'):
+        elif ttype in ('expense', 'direct_out', 'dasti_out', 'dasti_voucher_out', 'split_expense', 'settlement'):
             total_out += float(t.get('amount', 0))
             
     balance = total_in - total_out
@@ -3632,12 +3614,9 @@ def main_ledger():
     display_txns = []
     for t in all_txns:
         if not is_in_period(session, t.get('date', '')): continue
-        
-        # 🔀 VISUAL COMBINE: Show Master, Hide Legs
         if t.get('link_id') in master_links:
             if t.get('type') not in ('split_master_in', 'split_master_out'):
                 continue
-                
         display_txns.append(t)
         
     return render_template_string(MAIN_LEDGER_TEMPLATE, txns=display_txns, balance=balance, total_in=total_in, total_out=total_out, total_dasti=0, total_dasti_vouchers=0, username=session['username'], active_page='main_ledger')
@@ -3649,7 +3628,7 @@ def dasti_ledger():
     
     all_txns = [doc.to_dict() for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in', 'split_income'))
-    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out', 'batch_ledger_out', 'split_expense'))
+    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out', 'split_expense'))
     main_balance = total_in - total_out
 
     dasti_persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('dasti_persons').where('user_id', '==', firm_id).stream()]
@@ -3710,6 +3689,7 @@ def edit_dasti_person(id):
         if doc_ref.get().to_dict().get('user_id') == session['firm_id']:
             doc_ref.update({'name': new_name})
     return redirect(url_for('dasti_ledger'))
+
 @app.route('/persons')
 def persons():
     if 'user_id' not in session: return redirect(url_for('login'))
@@ -3732,7 +3712,7 @@ def persons():
 
     all_txns = [doc.to_dict() for doc in db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
     total_in = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('income', 'dasti_voucher_in', 'split_income'))
-    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out', 'batch_ledger_out', 'split_expense'))
+    total_out = sum(float(t.get('amount', 0)) for t in all_txns if t.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out', 'split_expense'))
     main_balance = total_in - total_out
 
     dasti_persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('dasti_persons').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()]
@@ -3868,17 +3848,9 @@ def reports():
         if start_date and r.get('date', '') < start_date: continue
         if end_date and r.get('date', '') > end_date: continue
         if category and r.get('category', '') != category: continue
-        
-        # Auto-remove prefixes for main cashbook comparison
-        if report_account == 'main':
-            desc = r.get('description', '')
-            desc = desc.replace('Transfer In ', '').replace('Transfer Out ', '').replace('Dasti In ', '').replace('Dasti Out ', '')
-            r['description'] = desc
-            
         results.append(r)
         
     results.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
-    
     total_in = sum(float(r.get('amount', 0)) for r in results if r.get('type') in ('income', 'settlement', 'dasti_voucher_in'))
     
     if report_account == 'main':
@@ -4131,7 +4103,7 @@ def edit_entry(table_name, row_id):
             is_split = True
             entry = master_txn
             for t in txn_docs:
-                if t['id'] != master_txn['id']:
+                if t['id'] != master_txn['id'] and t.get('type') != 'batch_ledger_out':
                     splits_data.append({'account': 'main', 'category': t.get('category'), 'amount': t.get('amount'), 'nature': t.get('voucher_nature', 'slip_in')})
             for p in person_docs:
                 splits_data.append({'account': f"person_{p.get('person_id')}", 'category': p.get('category'), 'amount': p.get('amount'), 'nature': p.get('voucher_nature', 'slip_in')})
@@ -4233,6 +4205,8 @@ def edit_entry(table_name, row_id):
                         leg_ops.append(('transactions', {**base_txn, 'description': master_desc, 'type': 'dasti_out', 'voucher_nature': 'advance'}))
                     elif txn_nature == 'receive_cash':
                         leg_ops.append(('transactions', {**base_txn, 'description': master_desc, 'type': 'income', 'voucher_nature': 'receive_cash'}))
+                    elif txn_nature == 'slip_in':
+                        leg_ops.append(('transactions', {**base_txn, 'description': master_desc, 'type': 'batch_ledger_out', 'voucher_nature': 'slip_in'}))
                         
                 elif account_raw.startswith('dasti_'):
                     pid = account_raw.split('_')[1]
@@ -4243,6 +4217,8 @@ def edit_entry(table_name, row_id):
                         leg_ops.append(('transactions', {**base_txn, 'description': master_desc, 'type': 'dasti_voucher_out', 'voucher_nature': 'advance'}))
                     elif txn_nature == 'receive_cash':
                         leg_ops.append(('transactions', {**base_txn, 'description': master_desc, 'type': 'dasti_voucher_in', 'voucher_nature': 'receive_cash'}))
+                    elif txn_nature == 'slip_in':
+                        leg_ops.append(('transactions', {**base_txn, 'description': master_desc, 'type': 'batch_ledger_out', 'voucher_nature': 'slip_in'}))
 
             unique_cats = []
             for r in valid_rows:
@@ -4320,6 +4296,7 @@ def edit_entry(table_name, row_id):
             elif new_account_type == 'person':
                 if new_nature == 'slip_in':
                     batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': new_primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'batch_ledger_out'})
                 elif new_nature == 'advance':
                     batch.set(db.collection('person_ledger').document(), {**base_txn, 'person_id': new_primary_id, 'description': desc, 'type': 'advance'})
                     batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'dasti_out'})
@@ -4329,6 +4306,7 @@ def edit_entry(table_name, row_id):
             elif new_account_type == 'dasti':
                 if new_nature == 'slip_in':
                     batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': new_primary_id, 'description': desc, 'type': 'settlement'})
+                    batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'batch_ledger_out'})
                 elif new_nature == 'advance':
                     batch.set(db.collection('dasti_ledger').document(), {**base_txn, 'dasti_person_id': new_primary_id, 'description': desc, 'type': 'advance'})
                     batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': 'dasti_voucher_out'})
@@ -4411,7 +4389,6 @@ def add_split_voucher():
     cust_cats = request.form.getlist('custom_category[]')
     amts = request.form.getlist('split_amount[]')
 
-    # DYNAMIC DATA GATHERING
     valid_rows = []
     for i in range(len(amts)):
         if amts[i].strip() and float(amts[i]) > 0:
@@ -4453,26 +4430,33 @@ def add_split_voucher():
                 **base_txn, 'description': master_desc, 
                 'type': leg_type, 'voucher_nature': txn_nature
             }))
-        elif account_raw == 'new_person':
-            new_ref = db.collection('persons').document()
-            batch.set(new_ref, {'user_id': firm_id, 'name': new_acc_name, 'deleted': 0})
-            pid = new_ref.id
+        else:
+            pid = ''
+            if account_raw == 'new_person':
+                new_ref = db.collection('persons').document()
+                batch.set(new_ref, {'user_id': firm_id, 'name': new_acc_name, 'deleted': 0})
+                pid, coll_name = new_ref.id, 'person_ledger'
+            elif account_raw == 'new_dasti':
+                new_ref = db.collection('dasti_persons').document()
+                batch.set(new_ref, {'user_id': firm_id, 'name': new_acc_name, 'deleted': 0})
+                pid, coll_name = new_ref.id, 'dasti_ledger'
+            elif account_raw.startswith('person_'):
+                pid, coll_name = account_raw.split('_')[1], 'person_ledger'
+            elif account_raw.startswith('dasti_'):
+                pid, coll_name = account_raw.split('_')[1], 'dasti_ledger'
+                
+            pid_field = 'person_id' if coll_name == 'person_ledger' else 'dasti_person_id'
             type_val = 'advance' if txn_nature == 'advance' else 'settlement'
-            leg_ops.append(('person_ledger', {**base_txn, 'person_id': pid, 'description': master_desc, 'type': type_val, 'voucher_nature': txn_nature}))
-        elif account_raw == 'new_dasti':
-            new_ref = db.collection('dasti_persons').document()
-            batch.set(new_ref, {'user_id': firm_id, 'name': new_acc_name, 'deleted': 0})
-            pid = new_ref.id
-            type_val = 'advance' if txn_nature == 'advance' else 'settlement'
-            leg_ops.append(('dasti_ledger', {**base_txn, 'dasti_person_id': pid, 'description': master_desc, 'type': type_val, 'voucher_nature': txn_nature}))
-        elif account_raw.startswith('person_'):
-            pid = account_raw.split('_')[1]
-            type_val = 'advance' if txn_nature == 'advance' else 'settlement'
-            leg_ops.append(('person_ledger', {**base_txn, 'person_id': pid, 'description': master_desc, 'type': type_val, 'voucher_nature': txn_nature}))
-        elif account_raw.startswith('dasti_'):
-            pid = account_raw.split('_')[1]
-            type_val = 'advance' if txn_nature == 'advance' else 'settlement'
-            leg_ops.append(('dasti_ledger', {**base_txn, 'dasti_person_id': pid, 'description': master_desc, 'type': type_val, 'voucher_nature': txn_nature}))
+            leg_ops.append((coll_name, {**base_txn, pid_field: pid, 'description': master_desc, 'type': type_val, 'voucher_nature': txn_nature}))
+            
+            if txn_nature == 'advance':
+                t_type = 'dasti_out' if coll_name == 'person_ledger' else 'dasti_voucher_out'
+                leg_ops.append(('transactions', {**base_txn, 'description': master_desc, 'type': t_type, 'voucher_nature': 'advance'}))
+            elif txn_nature == 'receive_cash':
+                t_type = 'income' if coll_name == 'person_ledger' else 'dasti_voucher_in'
+                leg_ops.append(('transactions', {**base_txn, 'description': master_desc, 'type': t_type, 'voucher_nature': 'receive_cash'}))
+            elif txn_nature == 'slip_in':
+                leg_ops.append(('transactions', {**base_txn, 'description': master_desc, 'type': 'batch_ledger_out', 'voucher_nature': 'slip_in'}))
 
     unique_cats = list(dict.fromkeys([r[0] for r in valid_rows]))
     master_category = ", ".join(unique_cats)
@@ -4490,7 +4474,6 @@ def add_split_voucher():
 
     batch.commit()
     return redirect(request.referrer or url_for('index'))
-
 # --- NEW DIRECT BUILD ROUTES ---
 @app.route('/add_approver', methods=['POST'])
 def add_approver():
@@ -4680,18 +4663,14 @@ def temp_ledger():
         t_type = t.get('type')
         amt = float(t.get('amount', 0))
         
-        # MATH Logic - Ignore master totals
-        if t_type in ('split_master_out', 'split_master_in'):
+        if t_type in ('split_master_out', 'split_master_in', 'batch_ledger_out'):
             pass 
         elif t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_income'):
             total_in += amt
-        elif t_type in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_expense', 'settlement', 'batch_ledger_out'):
+        elif t_type in ('expense', 'dasti_out', 'dasti_voucher_out', 'direct_out', 'split_expense', 'settlement'):
             total_out += amt
             
-        # DISPLAY Logic
         if not is_in_period(session, t.get('date', '')): continue
-        
-        # 🔀 VISUAL COMBINE: Show Master, Hide Legs
         if t.get('link_id') in master_links:
             if t_type not in ('split_master_in', 'split_master_out'):
                 continue
@@ -5159,6 +5138,7 @@ def fix_ledger_math():
         <a href="/" style="padding: 10px 20px; background: #4f46e5; color: white; text-decoration: none; border-radius: 8px;">Return to Dashboard</a>
     </div>
     """
+
 @app.route('/audit_ledger', methods=['GET'])
 def audit_ledger():
     if 'user_id' not in session or session.get('role') != 'superadmin':
@@ -5192,7 +5172,6 @@ def audit_ledger():
         status = t.get('status', 'approved')
         link_id = t.get('link_id', '')
 
-        # --- DYNAMIC DUPLICATE DETECTION LOGIC ---
         if t_type not in ('split_expense', 'split_income'):
             key_parts = []
             display_parts = []
@@ -5228,13 +5207,13 @@ def audit_ledger():
             anomalies.append({'issue': 'Negative Amount Value', 'data': t})
 
         is_known_in = t_type in ('income', 'dasti_voucher_in', 'direct_in', 'split_income')
-        is_known_out = t_type in ('expense', 'direct_out', 'dasti_out', 'dasti_voucher_out', 'split_expense', 'settlement', 'batch_ledger_out')
+        is_known_out = t_type in ('expense', 'direct_out', 'dasti_out', 'dasti_voucher_out', 'split_expense', 'settlement')
+        is_non_cash_out = t_type in ('batch_ledger_out',)
         
-        if not is_known_in and not is_known_out and t_type not in ('split_master_in', 'split_master_out'):
+        if not is_known_in and not is_known_out and not is_non_cash_out and t_type not in ('split_master_in', 'split_master_out'):
             anomalies.append({'issue': f'Unknown Type: {t_type}', 'data': t})
 
-        # Corrected Logic: Ignore master containers completely to prevent double counting
-        if t_type not in ('split_master_out', 'split_master_in'):
+        if t_type not in ('split_master_out', 'split_master_in', 'batch_ledger_out'):
             if status == 'approved':
                 if is_known_in:
                     dash_in += amt; raw_in += amt; count_in += 1
@@ -5246,7 +5225,6 @@ def audit_ledger():
                 elif is_known_out:
                     temp_dash_out += amt; temp_raw_out += amt; temp_count_out += 1
 
-    # Verify Split Voucher Mathematics
     for link_id, group in link_groups.items():
         master_txns = [tx for tx in group if tx.get('type') in ('split_master_in', 'split_master_out')]
         if master_txns:
@@ -5389,18 +5367,7 @@ def repair_ledger_math():
     update_count = 0
     fixes_applied = 0
     
-    # 1. PURGE BAD SLIP DEDUCTIONS FROM MAIN BOOK
-    docs = db.collection('transactions').where('user_id', '==', firm_id).where('type', '==', 'batch_ledger_out').stream()
-    for d in docs:
-        batch.delete(d.reference)
-        fixes_applied += 1
-        update_count += 1
-        if update_count >= 400:
-            batch.commit()
-            batch = db.batch()
-            update_count = 0
-            
-    # 2. RESTORE MISSING SPLIT VOUCHER LEGS FOR ADVANCES & RECEIPTS
+    # RESTORE MISSING SLIPS & LEGS TO MAIN BOOK
     for coll, t_out, t_in in [('person_ledger', 'dasti_out', 'income'), ('dasti_ledger', 'dasti_voucher_out', 'dasti_voucher_in')]:
         p_docs = db.collection(coll).where('user_id', '==', firm_id).where('deleted', '==', 0).stream()
         for p in p_docs:
@@ -5408,14 +5375,13 @@ def repair_ledger_math():
             link_id = data.get('link_id')
             txn_nature = data.get('voucher_nature')
             
-            if txn_nature in ('advance', 'receive_cash'):
-                # Check if the Main Book Leg actually exists
+            if txn_nature in ('advance', 'receive_cash', 'slip_in'):
                 tx_leg = list(db.collection('transactions').where('link_id', '==', link_id).where('user_id', '==', firm_id).where('amount', '==', data.get('amount')).stream())
                 
                 found_leg = False
                 for tx in tx_leg:
                     tx_type = tx.to_dict().get('type')
-                    if tx_type in (t_out, t_in, 'income', 'dasti_out', 'dasti_voucher_out', 'dasti_voucher_in'):
+                    if tx_type in (t_out, t_in, 'batch_ledger_out', 'income', 'dasti_out', 'dasti_voucher_out', 'dasti_voucher_in'):
                         found_leg = True
                         break
                         
@@ -5428,9 +5394,10 @@ def repair_ledger_math():
                         'is_flagged': data.get('is_flagged', 0), 'voucher_nature': txn_nature
                     }
                     
-                    # Strictly no name added to description
                     desc = data.get('description', '')
-                    type_val = t_out if txn_nature == 'advance' else t_in
+                    if txn_nature == 'advance': type_val = t_out
+                    elif txn_nature == 'receive_cash': type_val = t_in
+                    else: type_val = 'batch_ledger_out'
                     
                     batch.set(db.collection('transactions').document(), {**base_txn, 'description': desc, 'type': type_val})
                     fixes_applied += 1
@@ -5443,7 +5410,7 @@ def repair_ledger_math():
     if update_count > 0:
         batch.commit()
         
-    return f"✅ Database Math Repaired! {fixes_applied} missing or broken connections were successfully repaired in the Main Cashbook."
+    return f"✅ Database Math Repaired! {fixes_applied} missing connections (including Slips) were restored to the Main Cashbook."
 
 @app.route('/auto_fix_splits')
 def auto_fix_splits():

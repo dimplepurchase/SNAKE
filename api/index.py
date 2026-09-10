@@ -270,7 +270,7 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print" style="background: l
     
     {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
     <a href="/flag_entries" class="{% if active_page == 'flags' %}active{% endif %}" style="color: #fdba74; font-weight: 800; font-size: 1.05em; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); background: rgba(253, 186, 116, 0.15);">🚩 Flags</a>
-    <a href="/bulk_edit_date" class="{% if active_page == 'bulk_date' %}active{% endif %}" style="color: #d8b4fe; font-weight: 800; font-size: 1.05em; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); background: rgba(216, 180, 254, 0.15);">📅 Bulk Entries Correcion</a>
+    <a href="/bulk_edit_date" class="{% if active_page == 'bulk_date' %}active{% endif %}" style="color: #d8b4fe; font-weight: 800; font-size: 1.05em; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); background: rgba(216, 180, 254, 0.15);">📅 Bulk Editor</a>
     <a href="/logs" class="{% if active_page == 'logs' %}active{% endif %}" style="color: #a5b4fc; font-weight: 800; font-size: 1.05em; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); background: rgba(165, 180, 252, 0.15);">📝 Logs</a>
     {% endif %}
 
@@ -281,9 +281,11 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print" style="background: l
     {% if session.get('role') == 'superadmin' %}
         <a href="/manage_users" class="{% if active_page == 'users' %}active{% endif %}" style="color: #e879f9; font-weight: 800; font-size: 1.05em; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); background: rgba(232, 121, 249, 0.15);">⚙️ Users</a>
         <a href="/audit_ledger" class="{% if active_page == 'audit' %}active{% endif %}" style="color: #fb923c; font-weight: 800; font-size: 1.05em; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); background: rgba(251, 146, 60, 0.15);">🕵️‍♂️ Audit</a>
+        
+        <!-- NEW UPDATE BUTTON -->
+        <a href="/find_voucher" class="{% if active_page == 'update' %}active{% endif %}" style="color: #bef264; font-weight: 800; font-size: 1.05em; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); background: rgba(190, 242, 100, 0.15);">🔄 Update</a>
     {% endif %}
 
-    <!-- 📅 MONTHLY CLOSING SELECTOR & LOCK BADGE -->
     <div class="no-print" style="margin-left: auto; display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 5px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2);">
         <span style="color: #facc15; font-size: 0.85em; font-weight: 800; text-transform: uppercase;">Closing:</span>
         <form action="/set_working_period" method="POST" style="margin: 0; display: flex; gap: 5px;">
@@ -298,8 +300,6 @@ NAVBAR_HTML = SPLASH_HTML + '''<div class="navbar no-print" style="background: l
             <input type="number" name="working_year" value="{{ session.get('working_year') }}" onchange="this.form.submit()" min="2000" max="2100" style="padding: 2px 6px; font-size: 0.85em; border: none; border-radius: 4px; width: 70px; font-weight: bold; cursor: pointer;">
             {% endif %}
         </form>
-        
-        <!-- NEW: DYNAMIC LOCKED BALANCE DISPLAY -->
         {% if session.get('period_closed_balance') %}
         <span style="background: #be123c; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85em; font-weight: bold; margin-left: 5px; border: 1px solid #fda4af; box-shadow: 0 0 8px rgba(190,18,60,0.6);" title="This period is fully closed and locked.">
             🔒 Closed Bal: ₹{{ session.get('period_closed_balance') }}
@@ -348,7 +348,6 @@ USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + 
         <div class="form-group flex-1" style="min-width: 200px;"><label>Receipt Screen Mode</label><select name="receipt_display_mode" required><option value="strict" {% if sys_settings.receipt_display_mode == 'strict' %}selected{% endif %}>Pure Receipts Only</option><option value="all_positive" {% if sys_settings.receipt_display_mode == 'all_positive' %}selected{% endif %}>Show All Cash In (+)</option></select></div>
         <div class="form-group flex-1" style="min-width: 200px;"><label>Edit Action Mode</label><select name="edit_action_mode" required><option value="button" {% if sys_settings.edit_action_mode == 'button' %}selected{% endif %}>Visible Button</option><option value="tap" {% if sys_settings.edit_action_mode == 'tap' %}selected{% endif %}>Direct Tap</option></select></div>
         <div class="form-group flex-1" style="min-width: 200px;"><label>Report Flag Filter</label><select name="report_flag_mode" required><option value="both" {% if sys_settings.report_flag_mode == 'both' %}selected{% endif %}>Show All Entries</option><option value="flagged" {% if sys_settings.report_flag_mode == 'flagged' %}selected{% endif %}>Flagged Only</option><option value="unflagged" {% if sys_settings.report_flag_mode == 'unflagged' %}selected{% endif %}>Unflagged Only</option></select></div>
-        <div class="form-group flex-1" style="min-width: 200px;"><label>Report PDF Format</label><select name="report_pdf_format" required><option value="standard" {% if sys_settings.report_pdf_format == 'standard' %}selected{% endif %}>Standard Detail</option><option value="summary_breakdown" {% if sys_settings.report_pdf_format == 'summary_breakdown' %}selected{% endif %}>Summary Breakdown</option></select></div>
         <div class="form-group flex-1" style="min-width: 200px;"><label>Main Table Display Filter</label><select name="dashboard_table_filter" required style="border-color:#4f46e5; font-weight:bold;"><option value="strict" {% if sys_settings.dashboard_table_filter == 'strict' %}selected{% endif %}>Strict (Hide Advances & Settlements)</option><option value="all" {% if sys_settings.dashboard_table_filter == 'all' %}selected{% endif %}>Show All (Include Everything)</option></select></div>
         
         <div class="form-group flex-1" style="min-width: 200px;">
@@ -356,6 +355,14 @@ USERS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Manage Users</title>''' + 
             <select name="dashboard_sort_order" required style="border-color:#10b981; font-weight:bold;">
                 <option value="desc" {% if sys_settings.dashboard_sort_order == 'desc' %}selected{% endif %}>Newest First (Descending)</option>
                 <option value="asc" {% if sys_settings.dashboard_sort_order == 'asc' %}selected{% endif %}>Oldest First (Ascending)</option>
+            </select>
+        </div>
+
+        <div class="form-group flex-1" style="min-width: 220px;">
+            <label>Report Filter (Entries with '.')</label>
+            <select name="hide_dot_descriptions" required style="border-color:#8b5cf6; font-weight:bold; color: #4c1d95; background: #ede9fe;">
+                <option value="show" {% if sys_settings.hide_dot_descriptions == 'show' %}selected{% endif %}>Show All Entries</option>
+                <option value="hide" {% if sys_settings.hide_dot_descriptions == 'hide' %}selected{% endif %}>🚫 Hide entries where detail is "."</option>
             </select>
         </div>
         
@@ -631,10 +638,10 @@ TEMP_ENTRY_FORM_HTML = '''
     });
 </script>
 '''
-EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BASE_STYLE + '''</head><body>
+EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit/Update Entry</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
-        <div class="card" style="max-width: 850px; margin: 0 auto;">
-            <h2 style="color: var(--primary); margin-bottom: 20px;">✏️ Edit / Correct Transaction</h2>
+        <div class="card" style="max-width: 850px; margin: 0 auto; border-top: 4px solid var(--primary);">
+            <h2 style="color: var(--primary); margin-bottom: 20px;">✏️ Edit / Update Voucher</h2>
             <form action="/edit/{{ table_name }}/{{ entry.id }}" method="POST">
                 
                 <div class="flex-row" style="align-items: flex-end; margin-bottom:15px;">
@@ -649,9 +656,8 @@ EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BAS
                     <!-- SPLIT VOUCHER EDITOR -->
                     <input type="hidden" name="is_split_edit" value="1">
                     <div style="background:#f0f9ff; border:1px solid #bae6fd; padding:15px; border-radius:8px; margin-bottom:15px;">
-                        <h4 style="margin:0 0 15px 0; color:#0369a1;">🔀 Editing Split Voucher</h4>
+                        <h4 style="margin:0 0 15px 0; color:#0369a1;">🔀 Updating Split Voucher</h4>
                         <div class="flex-row">
-                            <!-- EXTRACRTS JUST THE MASTER DESCRIPTION AND IGNORES THE BREAKDOWN -->
                             <div class="form-group flex-2" style="flex:2;"><label>Master Description / Bill No.</label><input type="text" name="description" value="{{ entry.description.split('\n')[0] }}" required></div>
                             <div class="form-group flex-1">
                                 <label style="color:red;">Total Amount (₹) <small>(Auto)</small></label>
@@ -740,7 +746,7 @@ EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BAS
 
                 <div style="display: flex; gap: 15px; margin-top: 20px;">
                     <a href="javascript:history.back()" class="btn btn-outline" style="flex:1;">Cancel / Exit</a>
-                    <button class="btn-success" type="submit" id="saveEditBtn" style="flex:1;">Save Changes</button>
+                    <button class="btn-success" type="submit" id="saveEditBtn" style="flex:1; font-weight:bold; font-size: 1.1em;">💾 Update Voucher</button>
                 </div>
             </form>
         </div>
@@ -772,9 +778,9 @@ EDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Edit Entry</title>''' + BAS
 
                 document.getElementById('saveEditBtn').disabled = assigned <= 0;
             }
+            
             // Init calc on load
             document.addEventListener('DOMContentLoaded', updateSplitCalc);
-            
             {% endif %}
             
             function toggleCustomCategory(selectElem) {
@@ -1257,8 +1263,33 @@ INDEX_TEMPLATE = '''<!DOCTYPE html><html><head><title>Main Cash Book Dashboard</
     </script>
 </body></html>'''
 
-REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dynamic Reports</title>''' + BASE_STYLE + '''</head><body>
+REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>System Reports</title>''' + BASE_STYLE + '''
+<style>
+    @media print {
+        body { font-size: 11px; font-family: Arial, sans-serif; background: white; color: black; }
+        .no-print { display: none !important; }
+        .print-only { display: block !important; }
+        .container { width: 100%; max-width: none; padding: 0; margin: 0; }
+        .card { box-shadow: none; border: none; padding: 0; margin: 0; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; page-break-inside: auto; }
+        tr { page-break-inside: avoid; page-break-after: auto; }
+        th, td { border: 1px solid #ddd !important; padding: 6px 8px !important; text-align: left; }
+        th { background-color: #f1f5f9 !important; font-weight: bold; color: #000 !important; }
+        .text-right { text-align: right !important; }
+        h3 { border-bottom: 2px solid #000; padding-bottom: 5px; margin-top: 20px; }
+        .pdf-header { display: flex; justify-content: space-between; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+        .pdf-header h1 { margin: 0; font-size: 20px; }
+        .pdf-header p { margin: 2px 0; color: #555; }
+    }
+    .pdf-header { display: none; }
+    .report-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; background: white; border: 1px solid #e5e7eb; }
+    .report-table th { background: #f8fafc; padding: 12px; border: 1px solid #e5e7eb; color: #374151; }
+    .report-table td { padding: 10px 12px; border: 1px solid #e5e7eb; vertical-align: top; }
+    .text-right { text-align: right; }
+</style>
+</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
+        
         <div class="card no-print" style="padding: 25px; margin-bottom: 25px;">
             <h3 style="margin-bottom: 15px; font-size: 1.3em;">📊 Generate Report</h3>
             <form method="GET" action="/reports" style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end;">
@@ -1286,68 +1317,120 @@ REPORTS_TEMPLATE = '''<!DOCTYPE html><html><head><title>Dynamic Reports</title>'
         </div>
 
         <div class="no-print" style="margin-bottom: 20px; display: flex; gap: 10px; justify-content: flex-end;">
-            <button onclick="window.print()" class="btn btn-outline" style="background: white;">🖨️ Print Report</button>
-            <a href="{{ url_for('export_reports', start_date=start_date, end_date=end_date, category=category, report_account=report_account) }}" class="btn btn-success" style="background: #10b981;">📥 Download Excel (CSV)</a>
+            <button onclick="window.print()" class="btn btn-outline" style="background: white; border-color: #000; color: #000; font-weight: bold;">🖨️ Print to PDF</button>
+            <a href="{{ url_for('export_reports', start_date=start_date, end_date=end_date, category=category, report_account=report_account) }}" class="btn btn-success" style="background: #10b981;">📥 Download CSV</a>
         </div>
 
-        <div class="stats-grid">
-            <div class="stat-card" style="border-top: 4px solid var(--success);"><h4>Report Incomes / Received</h4><div class="value" style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--danger);"><h4>Report Expenses / Advances</h4><div class="value" style="color: var(--danger);">- ₹{{ "{:,.2f}".format(total_out) }}</div></div>
-            <div class="stat-card" style="border-top: 4px solid var(--primary); background: #f8fafc;"><h4>Report Net Flow</h4><div class="value">{% if (total_in - total_out) >= 0 %}<span style="color: var(--success);">+ ₹{{ "{:,.2f}".format(total_in - total_out) }}</span>{% else %}<span style="color: var(--danger);">- ₹{{ "{:,.2f}".format((total_in - total_out)|abs) }}</span>{% endif %}</div></div>
-        </div>
-
-        {% if session.get('can_view_ledger_details') == 1 or session.get('role') == 'superadmin' %}
-        <div class="card" style="padding: 0; overflow-x: auto;">
-            <div style="padding: 15px 25px; background: #f8fafc; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-                <h3 style="margin: 0;">Detailed Transaction History</h3>
-                <div style="display: flex; gap: 10px;">
-                    <button type="button" class="btn btn-sm btn-outline" onclick="filterLedger('all')">📜 All Entries</button>
-                    <button type="button" class="btn btn-sm" style="background: #e0e7ff; color: #3730a3;" onclick="filterLedger('in')">📥 Advance Given (+)</button>
-                    <button type="button" class="btn btn-sm" style="background: #d1fae5; color: #065f46;" onclick="filterLedger('out')">📤 Slip Settled (-)</button>
-                </div>
+        <!-- PRINT HEADER (Mirrors the PDF Structure) -->
+        <div class="print-only pdf-header">
+            <div>
+                <h1>{% if report_account == 'main' %}Cash Book{% else %}Ledger: {{ selected_person_name }}{% endif %}</h1>
+                <p>All Report</p>
+                <p>{% if category %}{{ category }}{% else %}All{% endif %}</p>
             </div>
-            
-            <form action="/bulk_delete" method="POST" onsubmit="return confirm('Are you sure you want to delete the selected entries?');">
-                <div style="padding: 10px 25px; background: #fffbeb; border-bottom: 1px solid var(--border);">
-                    <button type="submit" class="btn btn-danger btn-sm">🗑️ Delete Selected Entries</button>
-                </div>
-                <table style="width: 100%; min-width: 900px;">
-                    <thead><tr>
-                        <th style="padding-left: 25px; width: 40px;"><input type="checkbox" onclick="let cb = document.getElementsByName('selected_links'); for(let i=0;i<cb.length;i++) cb[i].checked = this.checked;" style="width:16px; height:16px; cursor:pointer;"></th>
-                        <th style="width: 5%;">Sr.</th>
-                        <th style="width: 15%;">Date & Time</th><th style="width: 15%;">Mode/Category</th><th style="width: 40%;">Bill No / Details & Link</th><th style="text-align: right; width: 10%;">Amount</th>{% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}<th style="text-align: center; width: 10%;">Act</th>{% endif %}
-                    </tr></thead>
-                    <tbody>
-                        {% for txn in txns %}
-                        <tr class="ledger-row" data-type="{% if txn.type in ['advance', 'income', 'dasti_voucher_in', 'direct_in', 'split_master_in', 'split_income'] %}in{% else %}out{% endif %}">
-                            <td style="padding-left: 25px;"><input type="checkbox" name="selected_links" value="{{ txn.link_id }}" style="width:16px; height:16px; cursor:pointer;"></td>
-                            <td style="font-weight: bold; color: #64748b;">{{ loop.index }}</td>
-                            <td><span style="font-weight: 500;">{{ txn.date }}</span><br><span style="color: #6b7280; font-size: 0.85em;">{{ txn.time }}</span></td>
-                            <td><span class="badge badge-mode">{{ txn.payment_mode }}</span><br><span style="font-size: 0.85em; color: #4b5563;">{{ txn.category }}</span></td>
-                            <td style="white-space: pre-wrap;">{{ txn.description }}
-                                {% if txn.status == 'approved' and txn.approved_by %}<br><span style="color: var(--success); font-size: 0.85em; font-weight: 600;">✓ Apprv: {{ txn.approved_by }}</span>{% endif %}
-                            </td>
-                            <td style="text-align: right;">
-                                {% if txn.status == 'pending' %}<span class="badge badge-pending">⏳ Pending</span><br>{% endif %}
-                                {% if txn.type == 'advance' %}<span class="badge badge-in" style="background:#e0e7ff; color:#3730a3;">+ ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Advance)</small></span>
-                                {% else %}<span class="badge badge-out" style="background:#d1fae5; color:#065f46;">- ₹{{ "{:,.2f}".format(txn.amount) }} <br><small>(Slip / Settle)</small></span>{% endif %}
-                            </td>
-                            {% if session.get('can_edit') == 1 or session.get('role') == 'superadmin' %}
-                            <td style="text-align: center;"><a href="/edit/person_ledger/{{ txn.id }}" class="btn btn-sm" style="background:#f59e0b;color:white;">✏️</a> <br> <a href="/delete/person_ledger/{{ txn.id }}" class="btn btn-sm btn-danger" onclick="return confirm('Move to Trash?');">🗑️</a></td>
-                            {% endif %}
-                        </tr>{% else %}<tr><td colspan="7" style="text-align:center; color:#9ca3af; padding: 40px;">No historical entries found for this person.</td></tr>{% endfor %}
-                    </tbody>
-                </table>
-            </form>
+            <div style="text-align: right;">
+                <p>{{ report_generated_time }}</p>
+            </div>
         </div>
-        {% else %}
-        <div class="card" style="padding: 40px; text-align: center; color: #6b7280; font-style: italic;">
-            <div style="font-size: 2em; margin-bottom: 10px;">🔒</div>
-            Detailed ledger entries are hidden.<br>Your account only has permission to view overall balances.<br>Contact your Administrator to request detailed access.
+
+        <!-- DYNAMIC PERSON OUTSTANDING ALERT -->
+        {% if report_account != 'main' %}
+        <div style="background:#f0f9ff; border: 2px solid #38bdf8; padding: 20px; margin-bottom: 25px; border-radius: 8px;">
+            <h2 style="margin:0; color:#0369a1; font-size: 1.8em;">👤 Account: {{ selected_person_name }}</h2>
+            <h3 style="margin:10px 0 0 0; font-size: 1.4em; color:{% if net_balance > 0 %}#dc2626{% else %}#15803d{% endif %};">
+                Net Outstanding Balance: 
+                {% if net_balance > 0 %}
+                    + ₹{{ "{:,.2f}".format(net_balance) }} (Owes Firm)
+                {% elif net_balance < 0 %}
+                    - ₹{{ "{:,.2f}".format(net_balance|abs) }} (Firm Owes)
+                {% else %}
+                    ₹0.00 (Settled)
+                {% endif %}
+            </h3>
         </div>
         {% endif %}
 
-    </div></body></html>'''
+        <div class="card" style="padding: 25px; border-radius: 0; box-shadow: none;">
+            
+            <!-- 1. SUMMARY TOTALS TABLE -->
+            <table class="report-table">
+                <tr>
+                    <th>Total Cash In</th>
+                    <th>Total Cash Out</th>
+                    <th>Net Balance</th>
+                    <th>Transactions</th>
+                </tr>
+                <tr>
+                    <td style="font-weight: bold; font-size: 1.1em; color: #047857;">Rs{{ "{:,.2f}".format(total_in) }}</td>
+                    <td style="font-weight: bold; font-size: 1.1em; color: #be123c;">Rs{{ "{:,.2f}".format(total_out) }}</td>
+                    <td style="font-weight: bold; font-size: 1.1em; color: #1e3a8a;">
+                        {% if net_balance >= 0 %}Rs{{ "{:,.2f}".format(net_balance) }}{% else %}-Rs{{ "{:,.2f}".format(net_balance|abs) }}{% endif %}
+                    </td>
+                    <td style="font-weight: bold; font-size: 1.1em;">{{ total_txns }}</td>
+                </tr>
+            </table>
+
+            <!-- 2. CATEGORY BREAKDOWN TABLE -->
+            <h3 style="color: #1f2937;">Category Breakdown</h3>
+            <table class="report-table">
+                <tr>
+                    <th>Category</th>
+                    <th class="text-right">Count</th>
+                    <th class="text-right">Cash In</th>
+                    <th class="text-right">Cash Out</th>
+                    <th class="text-right">Net</th>
+                </tr>
+                {% for c in cat_breakdown %}
+                <tr>
+                    <td style="font-weight: 500;">{{ c.name }}</td>
+                    <td class="text-right">{{ c.count }}</td>
+                    <td class="text-right" style="color: #047857;">Rs{{ "{:,.0f}".format(c.in) }}</td>
+                    <td class="text-right" style="color: #be123c;">Rs{{ "{:,.0f}".format(c.out) }}</td>
+                    <td class="text-right" style="font-weight: bold;">
+                        {% if c.net >= 0 %}Rs{{ "{:,.0f}".format(c.net) }}{% else %}-Rs{{ "{:,.0f}".format(c.net|abs) }}{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </table>
+
+            <!-- 3. TRANSACTION DETAILS TABLE -->
+            <h3 style="color: #1f2937;">Transaction Details</h3>
+            <table class="report-table">
+                <tr>
+                    <th style="width: 5%;">#</th>
+                    <th style="width: 12%;">Date</th>
+                    <th style="width: 12%;">Party / Mode</th>
+                    <th style="width: 30%;">Remarks</th>
+                    <th style="width: 12%;">Category</th>
+                    <th class="text-right" style="width: 10%;">Cash In</th>
+                    <th class="text-right" style="width: 10%;">Cash Out</th>
+                    <th class="text-right" style="width: 10%;">Balance</th>
+                </tr>
+                {% for t in results %}
+                <tr style="background: {% if t.status == 'pending' %}#fffbeb{% else %}transparent{% endif %};">
+                    <td style="color: #6b7280; font-weight: 500;">{{ loop.index }}</td>
+                    <td>
+                        <span style="font-weight: bold;">
+                            {% set date_obj = t.date.split('-') %}
+                            {% if date_obj|length == 3 %}{{ date_obj[2] }} {% if date_obj[1]=='01' %}Jan{% elif date_obj[1]=='02' %}Feb{% elif date_obj[1]=='03' %}Mar{% elif date_obj[1]=='04' %}Apr{% elif date_obj[1]=='05' %}May{% elif date_obj[1]=='06' %}Jun{% elif date_obj[1]=='07' %}Jul{% elif date_obj[1]=='08' %}Aug{% elif date_obj[1]=='09' %}Sep{% elif date_obj[1]=='10' %}Oct{% elif date_obj[1]=='11' %}Nov{% elif date_obj[1]=='12' %}Dec{% endif %}<br>{{ date_obj[0][2:] }}{% else %}{{ t.date }}{% endif %}
+                        </span>
+                    </td>
+                    <td style="font-size: 0.9em; color: #4b5563;">{{ t.approved_by or t.payment_mode }}</td>
+                    <td style="white-space: pre-wrap; font-size: 0.95em;">{{ t.description }}{% if t.status == 'pending' %}<br><span style="color:#b45309; font-weight:bold; font-size: 0.85em;">(PENDING)</span>{% endif %}</td>
+                    <td style="font-size: 0.95em;">{{ t.category }}</td>
+                    <td class="text-right" style="color: #047857;">{% if t.cash_in > 0 %}Rs{{ "{:,.0f}".format(t.cash_in) }}{% endif %}</td>
+                    <td class="text-right" style="color: #be123c;">{% if t.cash_out > 0 %}Rs{{ "{:,.0f}".format(t.cash_out) }}{% endif %}</td>
+                    <td class="text-right" style="font-weight: bold; color: #1e3a8a;">
+                        {% if t.running_balance >= 0 %}Rs{{ "{:,.0f}".format(t.running_balance) }}{% else %}-Rs{{ "{:,.0f}".format(t.running_balance|abs) }}{% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" style="text-align: center; color: #9ca3af; padding: 40px;">No transactions found for this period.</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+</body></html>'''
 
 
 TRASH_TEMPLATE = '''<!DOCTYPE html><html><head><title>Trash / Recycle Bin</title>''' + BASE_STYLE + '''</head><body>
@@ -1375,10 +1458,10 @@ TRASH_TEMPLATE = '''<!DOCTYPE html><html><head><title>Trash / Recycle Bin</title
         </div>
     </div></body></html>'''
 
-BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correction & Delete</title>''' + BASE_STYLE + '''</head><body>
+BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Inline Mass Editor</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
         <div class="card">
-            <h3 style="margin-top: 0; color: var(--primary);">📅 Search & Bulk Update / Delete</h3>
+            <h3 style="margin-top: 0; color: var(--primary);">📅 Search & Inline Multi-Edit</h3>
             <form action="/bulk_edit_date" method="POST" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
                 <input type="hidden" name="action" value="search">
                 <div class="form-group flex-1" style="min-width: 130px;"><label>From Date</label><input type="date" name="start_date" value="{{ start_date }}" required></div>
@@ -1391,62 +1474,51 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
         
         {% if has_searched %}
         <div class="card" style="padding: 0;">
-            <!-- Added ID to form for Javascript targeting -->
             <form action="/bulk_edit_date" method="POST" id="bulkForm">
                 <input type="hidden" name="action" value="update_dates">
                 
                 <!-- ACTION BAR -->
-                <div style="padding: 15px 20px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 15px;">
-                    <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
-                        <div class="form-group" style="margin-bottom: 0; min-width: 250px;">
-                            <label style="color:#92400e;">Set New Date For Selected Entries:</label>
-                            <!-- Removed the HTML 'required' tag so the Delete button isn't blocked by it -->
-                            <input type="date" name="new_date" id="new_date_input" style="border-color: var(--warning); font-weight:bold; background: white;">
+                <div style="padding: 15px 20px; background: #fffbeb; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 15px; position: sticky; top: 0; z-index: 10; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                    <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                        
+                        <!-- MASS OVERRIDE INPUTS (OPTIONAL) -->
+                        <div class="form-group" style="margin-bottom: 0; min-width: 130px; flex: 1;">
+                            <label style="color:#92400e; font-size: 0.85em;">Override Date:</label>
+                            <input type="date" name="new_date" style="border-color: #fcd34d; background: white;" title="Leave blank to use inline dates below">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 130px; flex: 1;">
+                            <label style="color:#92400e; font-size: 0.85em;">Override Category:</label>
+                            <select name="new_category" style="border-color: #fcd34d; background: white;">
+                                <option value="">- Ignore -</option>
+                                {% for c in categories %}<option value="{{c}}">{{c}}</option>{% endfor %}
+                            </select>
                         </div>
                         
-                        <!-- UPDATE BUTTON -->
-                        <button type="submit" class="btn btn-warning" onclick="if(!document.getElementById('new_date_input').value){ alert('Please select a New Date first!'); return false; } document.getElementById('bulkForm').action='/bulk_edit_date'; return confirm('Are you sure you want to change the date for ALL selected entries?');" style="height: 43px; padding: 0 25px;">✏️ Update Selected Dates</button>
+                        <!-- SAVE BUTTON -->
+                        <button type="submit" class="btn btn-success" onclick="
+                            let cb = document.querySelectorAll('.row-checkbox:checked');
+                            if(cb.length === 0){ alert('Please check at least one row to save!'); return false; }
+                            document.getElementById('bulkForm').action='/bulk_edit_date'; 
+                            return confirm('💾 Save inline edits for all ' + cb.length + ' selected vouchers?');
+                        " style="height: 43px; padding: 0 25px; font-weight: bold; flex: 1; box-shadow: 0 4px 6px rgba(16,185,129,0.3); font-size: 1.05em;">💾 Save Checked Edits</button>
                         
                         <!-- MASS DELETE BUTTON -->
-                        <button type="submit" class="btn btn-danger" onclick="document.getElementById('bulkForm').action='/bulk_delete'; return confirm('⚠️ Are you sure you want to move ALL selected entries to the Trash?');" style="height: 43px; padding: 0 25px; margin-left: auto; box-shadow: 0 4px 6px rgba(220,38,38,0.3);">🗑️ Delete Selected Entries</button>
+                        <button type="submit" formaction="/bulk_delete" formnovalidate class="btn btn-danger" onclick="document.getElementById('bulkForm').action='/bulk_delete'; return confirm('⚠️ Are you sure you want to move ALL selected entries to the Trash?');" style="height: 43px; padding: 0 15px; margin-left: auto; box-shadow: 0 4px 6px rgba(220,38,38,0.3);">🗑️ Delete</button>
                     </div>
 
                     <!-- DYNAMIC SUMMARY BAR -->
-                    <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; background: #fef3c7; padding: 10px 15px; border-radius: 8px; border: 1px solid #fde68a;">
+                    <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; background: #fef3c7; padding: 10px 15px; border-radius: 8px; border: 1px dashed #fde68a;">
                         <div style="display: flex; flex-direction: column; min-width: 100px;">
-                            <span style="color:#92400e; font-weight:bold; font-size: 0.9em;">Total Selected</span>
+                            <span style="color:#92400e; font-weight:bold; font-size: 0.9em;">Total Checked</span>
                             <strong id="calc-count" style="font-size: 1.3em;">0</strong>
                         </div>
-                        <div style="display: flex; flex-direction: column; min-width: 100px;">
-                            <span style="color:#047857; font-weight:bold; font-size: 0.9em;">Approved</span>
-                            <strong id="calc-approved" style="font-size: 1.3em;">0</strong>
-                        </div>
-                        <div style="display: flex; flex-direction: column; min-width: 100px;">
-                            <span style="color:#b45309; font-weight:bold; font-size: 0.9em;">Temp (Pending)</span>
-                            <strong id="calc-temp" style="font-size: 1.3em;">0</strong>
-                        </div>
-                        
-                        <div style="border-left: 2px solid #fcd34d; height: 35px; margin: 0 10px;"></div>
-
                         <div style="display: flex; flex-direction: column; min-width: 140px;">
-                            <span style="color: var(--success); font-weight:bold; font-size: 0.9em;">Total Receipts (+)</span>
+                            <span style="color: var(--success); font-weight:bold; font-size: 0.9em;">Checked Receipts (+)</span>
                             <strong id="calc-positive" style="font-size: 1.3em;">₹0.00</strong>
                         </div>
                         <div style="display: flex; flex-direction: column; min-width: 140px;">
-                            <span style="color: var(--danger); font-weight:bold; font-size: 0.9em;">Total Payments (-)</span>
+                            <span style="color: var(--danger); font-weight:bold; font-size: 0.9em;">Checked Payments (-)</span>
                             <strong id="calc-negative" style="font-size: 1.3em;">₹0.00</strong>
-                        </div>
-
-                        <!-- TARGET MATCH INPUTS -->
-                        <div style="display: flex; gap: 10px; margin-left: auto; background: white; padding: 8px; border-radius: 6px; border: 1px dashed #d1d5db;">
-                            <div class="form-group" style="margin: 0;">
-                                <label style="font-size: 0.75em; color: var(--success);">Target Match (+)</label>
-                                <input type="number" id="target-pos" placeholder="e.g. 5000" onkeyup="calculateSelection()" onchange="calculateSelection()" style="padding: 4px; width: 100px; font-size: 0.9em; border-color: var(--success);">
-                            </div>
-                            <div class="form-group" style="margin: 0;">
-                                <label style="font-size: 0.75em; color: var(--danger);">Target Match (-)</label>
-                                <input type="number" id="target-neg" placeholder="e.g. 1200" onkeyup="calculateSelection()" onchange="calculateSelection()" style="padding: 4px; width: 100px; font-size: 0.9em; border-color: var(--danger);">
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -1458,35 +1530,49 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
                     <table id="pos-table" style="width: 100%; border: none; margin-bottom: 30px; border-bottom: 2px solid #a7f3d0; background: white;">
                         <tr style="background: #ecfdf5;">
                             <th style="padding-left: 20px; width: 40px; padding-top: 10px; padding-bottom: 10px;">
-                                <input type="checkbox" onclick="toggleTableCheckboxes(this, 'pos-table')" style="width:16px; height:16px; cursor:pointer;" title="Select All Receipts">
+                                <input type="checkbox" onclick="toggleTableCheckboxes(this, 'pos-table')" style="width:18px; height:18px; cursor:pointer;" title="Select All Receipts">
                             </th>
-                            <th style="color: #065f46;">Current Date & Time</th>
-                            <th style="color: #065f46;">Category / Detail</th>
-                            <th style="text-align: right; padding-right: 20px; color: #065f46;">Amount</th>
-                            <th style="text-align: center; color: #065f46;">Act</th>
+                            <th style="color: #065f46;">Date & Time</th>
+                            <th style="color: #065f46;">Mode & Category</th>
+                            <th style="color: #065f46;">Description / Detail</th>
+                            <th style="text-align: right; padding-right: 20px; color: #065f46;">Amount (₹)</th>
                         </tr>
                         {% set pos_count = namespace(val=0) %}
                         {% for t in results %}
                             {% if t.type not in ['expense', 'direct_out', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'split_expense', 'settlement'] %}
                                 {% set pos_count.val = pos_count.val + 1 %}
                                 <tr style="background: {% if t.status == 'pending' %}#fefce8{% else %}transparent{% endif %}; border-bottom: 1px solid #f3f4f6;">
-                                    <td style="padding-left: 20px; padding-top: 10px; padding-bottom: 10px;">
-                                        <input type="checkbox" name="selected_links" class="row-checkbox" value="{{ t.link_id }}" 
-                                            data-amount="{{ t.amount }}" 
-                                            data-txn-type="in" 
-                                            data-status="{{ t.status }}"
-                                            data-desc="{{ t.get('description', '') | replace('\"', '&quot;') | replace('\n', ' ') }}"
-                                            onchange="calculateSelection()" 
-                                            style="width:16px; height:16px; cursor:pointer;">
+                                    <td style="padding-left: 20px; padding-top: 10px; padding-bottom: 10px; vertical-align: top;">
+                                        <input type="checkbox" name="selected_links" class="row-checkbox" value="{{ t.link_id }}|{{ t.id }}" 
+                                            data-amount="{{ t.amount }}" data-txn-type="in" data-status="{{ t.status }}"
+                                            onchange="calculateSelection()" style="width:18px; height:18px; cursor:pointer; margin-top: 8px;">
                                     </td>
-                                    <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                                    <td><span class="badge badge-mode">{{ t.category }}</span><br><span style="white-space: pre-wrap;">{{ t.get('description', '') }}</span></td>
-                                    <td style="text-align: right; padding-right: 20px;">
-                                        {% if t.status == 'pending' %}<span class="badge" style="background:#fef3c7; color:#b45309; border:1px solid #fcd34d; font-size: 0.7em; padding: 2px 6px;">⏳ TEMP</span><br>{% endif %}
-                                        <strong style="color:green;">+ ₹{{ "{:,.2f}".format(t.amount | default(0)) }}</strong>
+                                    <td style="vertical-align: top; padding-top: 10px;">
+                                        <div style="display:flex; flex-direction:column; gap:4px;">
+                                            <input type="date" name="date_{{ t.id }}" value="{{ t.date }}" style="width: 120px; font-size: 0.85em; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                            <input type="time" name="time_{{ t.id }}" value="{{ t.time }}" style="width: 120px; font-size: 0.85em; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                        </div>
                                     </td>
-                                    <td style="text-align: center;">
-                                        <a href="/edit/transactions/{{ t.id }}" target="_blank" class="btn btn-sm" style="background:#f59e0b;color:white;" title="Edit this entry">✏️</a>
+                                    <td style="vertical-align: top; padding-top: 10px;">
+                                        <div style="display:flex; flex-direction:column; gap:4px;">
+                                            <select name="mode_{{ t.id }}" style="font-size: 0.85em; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                                <option value="Cash" {% if t.payment_mode == 'Cash' %}selected{% endif %}>Cash</option>
+                                                <option value="Online" {% if t.payment_mode == 'Online' %}selected{% endif %}>Online</option>
+                                            </select>
+                                            <select name="category_{{ t.id }}" style="font-size: 0.85em; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; width: 140px;">
+                                                {% for c in categories %}<option value="{{ c }}" {% if t.category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+                                            </select>
+                                        </div>
+                                    </td>
+                                    <td style="vertical-align: top; padding-top: 10px;">
+                                        <textarea name="desc_{{ t.id }}" style="width: 100%; min-width: 250px; font-size: 0.85em; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; resize: vertical; min-height: 55px; box-sizing: border-box;">{{ t.get('description', '') }}</textarea>
+                                    </td>
+                                    <td style="text-align: right; padding-right: 20px; vertical-align: top; padding-top: 10px;">
+                                        {% if t.status == 'pending' %}<span class="badge" style="background:#fef3c7; color:#b45309; border:1px solid #fcd34d; font-size: 0.7em; padding: 2px 6px; display: block; margin-bottom: 5px; width: max-content; float: right;">⏳ TEMP</span><br style="clear:both;">{% endif %}
+                                        <div style="display:flex; align-items:center; justify-content:flex-end; gap: 5px;">
+                                            <span style="color:green; font-weight:bold;">+₹</span>
+                                            <input type="number" step="0.01" name="amount_{{ t.id }}" value="{{ t.amount }}" onkeyup="updateLiveAmount(this)" onchange="updateLiveAmount(this)" style="width: 100px; font-size: 0.95em; padding: 6px; text-align: right; border: 1px solid #d1d5db; border-radius: 4px; font-weight: bold; color: green;">
+                                        </div>
                                     </td>
                                 </tr>
                             {% endif %}
@@ -1501,35 +1587,49 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
                     <table id="neg-table" style="width: 100%; border: none; margin-bottom: 10px; border-bottom: 2px solid #fecaca; background: white;">
                         <tr style="background: #fef2f2;">
                             <th style="padding-left: 20px; width: 40px; padding-top: 10px; padding-bottom: 10px;">
-                                <input type="checkbox" onclick="toggleTableCheckboxes(this, 'neg-table')" style="width:16px; height:16px; cursor:pointer;" title="Select All Payments">
+                                <input type="checkbox" onclick="toggleTableCheckboxes(this, 'neg-table')" style="width:18px; height:18px; cursor:pointer;" title="Select All Payments">
                             </th>
-                            <th style="color: #991b1b;">Current Date & Time</th>
-                            <th style="color: #991b1b;">Category / Detail</th>
-                            <th style="text-align: right; padding-right: 20px; color: #991b1b;">Amount</th>
-                            <th style="text-align: center; color: #991b1b;">Act</th>
+                            <th style="color: #991b1b;">Date & Time</th>
+                            <th style="color: #991b1b;">Mode & Category</th>
+                            <th style="color: #991b1b;">Description / Detail</th>
+                            <th style="text-align: right; padding-right: 20px; color: #991b1b;">Amount (₹)</th>
                         </tr>
                         {% set neg_count = namespace(val=0) %}
                         {% for t in results %}
                             {% if t.type in ['expense', 'direct_out', 'dasti_out', 'batch_ledger_out', 'dasti_voucher_out', 'split_expense', 'settlement'] %}
                                 {% set neg_count.val = neg_count.val + 1 %}
                                 <tr style="background: {% if t.status == 'pending' %}#fefce8{% else %}transparent{% endif %}; border-bottom: 1px solid #f3f4f6;">
-                                    <td style="padding-left: 20px; padding-top: 10px; padding-bottom: 10px;">
-                                        <input type="checkbox" name="selected_links" class="row-checkbox" value="{{ t.link_id }}" 
-                                            data-amount="{{ t.amount }}" 
-                                            data-txn-type="out" 
-                                            data-status="{{ t.status }}"
-                                            data-desc="{{ t.get('description', '') | replace('\"', '&quot;') | replace('\n', ' ') }}"
-                                            onchange="calculateSelection()" 
-                                            style="width:16px; height:16px; cursor:pointer;">
+                                    <td style="padding-left: 20px; padding-top: 10px; padding-bottom: 10px; vertical-align: top;">
+                                        <input type="checkbox" name="selected_links" class="row-checkbox" value="{{ t.link_id }}|{{ t.id }}" 
+                                            data-amount="{{ t.amount }}" data-txn-type="out" data-status="{{ t.status }}"
+                                            onchange="calculateSelection()" style="width:18px; height:18px; cursor:pointer; margin-top: 8px;">
                                     </td>
-                                    <td><span style="font-weight: 500;">{{ t.date }}</span><br><span style="font-size: 0.85em; color: #6b7280;">{{ t.time }}</span></td>
-                                    <td><span class="badge badge-mode">{{ t.category }}</span><br><span style="white-space: pre-wrap;">{{ t.get('description', '') }}</span></td>
-                                    <td style="text-align: right; padding-right: 20px;">
-                                        {% if t.status == 'pending' %}<span class="badge" style="background:#fef3c7; color:#b45309; border:1px solid #fcd34d; font-size: 0.7em; padding: 2px 6px;">⏳ TEMP</span><br>{% endif %}
-                                        <strong style="color:red;">- ₹{{ "{:,.2f}".format(t.amount | default(0)) }}</strong>
+                                    <td style="vertical-align: top; padding-top: 10px;">
+                                        <div style="display:flex; flex-direction:column; gap:4px;">
+                                            <input type="date" name="date_{{ t.id }}" value="{{ t.date }}" style="width: 120px; font-size: 0.85em; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                            <input type="time" name="time_{{ t.id }}" value="{{ t.time }}" style="width: 120px; font-size: 0.85em; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                        </div>
                                     </td>
-                                    <td style="text-align: center;">
-                                        <a href="/edit/transactions/{{ t.id }}" target="_blank" class="btn btn-sm" style="background:#f59e0b;color:white;" title="Edit this entry">✏️</a>
+                                    <td style="vertical-align: top; padding-top: 10px;">
+                                        <div style="display:flex; flex-direction:column; gap:4px;">
+                                            <select name="mode_{{ t.id }}" style="font-size: 0.85em; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px;">
+                                                <option value="Cash" {% if t.payment_mode == 'Cash' %}selected{% endif %}>Cash</option>
+                                                <option value="Online" {% if t.payment_mode == 'Online' %}selected{% endif %}>Online</option>
+                                            </select>
+                                            <select name="category_{{ t.id }}" style="font-size: 0.85em; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; width: 140px;">
+                                                {% for c in categories %}<option value="{{ c }}" {% if t.category == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+                                            </select>
+                                        </div>
+                                    </td>
+                                    <td style="vertical-align: top; padding-top: 10px;">
+                                        <textarea name="desc_{{ t.id }}" style="width: 100%; min-width: 250px; font-size: 0.85em; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; resize: vertical; min-height: 55px; box-sizing: border-box;">{{ t.get('description', '') }}</textarea>
+                                    </td>
+                                    <td style="text-align: right; padding-right: 20px; vertical-align: top; padding-top: 10px;">
+                                        {% if t.status == 'pending' %}<span class="badge" style="background:#fef3c7; color:#b45309; border:1px solid #fcd34d; font-size: 0.7em; padding: 2px 6px; display: block; margin-bottom: 5px; width: max-content; float: right;">⏳ TEMP</span><br style="clear:both;">{% endif %}
+                                        <div style="display:flex; align-items:center; justify-content:flex-end; gap: 5px;">
+                                            <span style="color:red; font-weight:bold;">-₹</span>
+                                            <input type="number" step="0.01" name="amount_{{ t.id }}" value="{{ t.amount }}" onkeyup="updateLiveAmount(this)" onchange="updateLiveAmount(this)" style="width: 100px; font-size: 0.95em; padding: 6px; text-align: right; border: 1px solid #d1d5db; border-radius: 4px; font-weight: bold; color: red;">
+                                        </div>
                                     </td>
                                 </tr>
                             {% endif %}
@@ -1539,13 +1639,6 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
                         {% endif %}
                     </table>
 
-                </div>
-                
-                <!-- AI RECONCILIATION SUGGESTION PANEL -->
-                <div id="suggestion-panel" style="margin: 20px; padding: 15px; background: #f0fdf4; border: 2px solid #86efac; border-radius: 8px; display: none;">
-                    <h4 style="margin-top: 0; color: #166534; display: flex; align-items: center; gap: 8px;">🤖 Match Diagnostics</h4>
-                    <div id="pos-suggestion" style="margin-bottom: 8px; font-size: 0.95em; color: #065f46;"></div>
-                    <div id="neg-suggestion" style="font-size: 0.95em; color: #991b1b;"></div>
                 </div>
 
             </form>
@@ -1558,6 +1651,14 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
                 checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
                 calculateSelection();
             }
+            
+            function updateLiveAmount(inputElem) {
+                // Instantly update the data-amount attribute on the checkbox so the calculator stays accurate
+                let row = inputElem.closest('tr');
+                let checkbox = row.querySelector('.row-checkbox');
+                checkbox.setAttribute('data-amount', inputElem.value);
+                if(checkbox.checked) calculateSelection();
+            }
 
             function calculateSelection() {
                 let checkboxes = document.querySelectorAll('.row-checkbox');
@@ -1566,9 +1667,6 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
                 let approvedCount = 0;
                 let totalPositive = 0;
                 let totalNegative = 0;
-
-                let selectedPos = []; let unselectedPos = [];
-                let selectedNeg = []; let unselectedNeg = [];
 
                 checkboxes.forEach(cb => {
                     let amount = parseFloat(cb.getAttribute('data-amount')) || 0;
@@ -1580,82 +1678,15 @@ BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correct
                         if (status === 'pending') tempCount++;
                         else approvedCount++;
 
-                        if (type === 'in') { totalPositive += amount; selectedPos.push(cb); }
-                        else { totalNegative += amount; selectedNeg.push(cb); }
-                    } else {
-                        if (type === 'in') { unselectedPos.push(cb); }
-                        else { unselectedNeg.push(cb); }
+                        if (type === 'in') { totalPositive += amount; }
+                        else { totalNegative += amount; }
                     }
                 });
 
                 let fmt = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
                 document.getElementById('calc-count').innerText = count;
-                document.getElementById('calc-temp').innerText = tempCount;
-                document.getElementById('calc-approved').innerText = approvedCount;
                 document.getElementById('calc-positive').innerText = fmt.format(totalPositive).replace('₹', '₹');
                 document.getElementById('calc-negative').innerText = fmt.format(totalNegative).replace('₹', '₹');
-
-                let targetPosRaw = document.getElementById('target-pos').value;
-                let targetNegRaw = document.getElementById('target-neg').value;
-                let targetPos = parseFloat(targetPosRaw) || 0;
-                let targetNeg = parseFloat(targetNegRaw) || 0;
-                
-                let panel = document.getElementById('suggestion-panel');
-                let pSugg = document.getElementById('pos-suggestion');
-                let nSugg = document.getElementById('neg-suggestion');
-                
-                pSugg.innerHTML = "";
-                nSugg.innerHTML = "";
-
-                if (targetPosRaw !== "" || targetNegRaw !== "") {
-                    panel.style.display = 'block';
-
-                    if (targetPosRaw !== "") {
-                        let diffPos = totalPositive - targetPos;
-                        if (Math.abs(diffPos) < 0.01) {
-                            pSugg.innerHTML = "<strong>Positive (+):</strong> ✅ Balances match perfectly!";
-                        } else if (diffPos > 0) {
-                            let matches = selectedPos.filter(cb => Math.abs(parseFloat(cb.dataset.amount) - diffPos) < 0.01);
-                            if (matches.length > 0) {
-                                pSugg.innerHTML = `<strong>Positive (+):</strong> You selected ₹${diffPos.toFixed(2)} too much. <br>💡 <strong>Suggestion: UNCHECK</strong> ➔ "${matches[0].dataset.desc}" (₹${diffPos.toFixed(2)})`;
-                            } else {
-                                pSugg.innerHTML = `<strong>Positive (+):</strong> You selected ₹${diffPos.toFixed(2)} too much. (No single selected voucher matches this exact amount).`;
-                            }
-                        } else {
-                            let need = Math.abs(diffPos);
-                            let matches = unselectedPos.filter(cb => Math.abs(parseFloat(cb.dataset.amount) - need) < 0.01);
-                            if (matches.length > 0) {
-                                pSugg.innerHTML = `<strong>Positive (+):</strong> You are short by ₹${need.toFixed(2)}. <br>💡 <strong>Suggestion: CHECK</strong> ➔ "${matches[0].dataset.desc}" (₹${need.toFixed(2)})`;
-                            } else {
-                                pSugg.innerHTML = `<strong>Positive (+):</strong> You are short by ₹${need.toFixed(2)}. (Consider creating a new entry for this exact amount).`;
-                            }
-                        }
-                    }
-
-                    if (targetNegRaw !== "") {
-                        let diffNeg = totalNegative - targetNeg;
-                        if (Math.abs(diffNeg) < 0.01) {
-                            nSugg.innerHTML = "<strong>Negative (-):</strong> ✅ Balances match perfectly!";
-                        } else if (diffNeg > 0) {
-                            let matches = selectedNeg.filter(cb => Math.abs(parseFloat(cb.dataset.amount) - diffNeg) < 0.01);
-                            if (matches.length > 0) {
-                                nSugg.innerHTML = `<strong>Negative (-):</strong> You selected ₹${diffNeg.toFixed(2)} too much. <br>💡 <strong>Suggestion: UNCHECK</strong> ➔ "${matches[0].dataset.desc}" (₹${diffNeg.toFixed(2)})`;
-                            } else {
-                                nSugg.innerHTML = `<strong>Negative (-):</strong> You selected ₹${diffNeg.toFixed(2)} too much. (No single selected voucher matches this exact amount).`;
-                            }
-                        } else {
-                            let need = Math.abs(diffNeg);
-                            let matches = unselectedNeg.filter(cb => Math.abs(parseFloat(cb.dataset.amount) - need) < 0.01);
-                            if (matches.length > 0) {
-                                nSugg.innerHTML = `<strong>Negative (-):</strong> You are short by ₹${need.toFixed(2)}. <br>💡 <strong>Suggestion: CHECK</strong> ➔ "${matches[0].dataset.desc}" (₹${need.toFixed(2)})`;
-                            } else {
-                                nSugg.innerHTML = `<strong>Negative (-):</strong> You are short by ₹${need.toFixed(2)}. (Consider creating a new entry for this exact amount).`;
-                            }
-                        }
-                    }
-                } else {
-                    panel.style.display = 'none';
-                }
             }
         </script>
         {% endif %}
@@ -2754,6 +2785,49 @@ AUDIT_TEMPLATE = '''<!DOCTYPE html><html><head><title>Ledger Audit & Diagnostics
         });
     </script>
 </body></html>'''
+FIND_VOUCHER_TEMPLATE = '''<!DOCTYPE html><html><head><title>Update Voucher</title>''' + BASE_STYLE + '''</head><body>
+<div class="container">''' + NAVBAR_HTML + '''
+    <div class="card" style="max-width: 800px; margin: 0 auto; border-top: 4px solid #16a34a;">
+        <h3 style="margin-top: 0; color: #16a34a;">🔄 Find & Update Voucher</h3>
+        <p style="color: #4b5563; font-size: 0.95em;">Search for any transaction to instantly open its Edit/Update screen.</p>
+        <form action="/find_voucher" method="POST" style="display: flex; gap: 15px; align-items: flex-end;">
+            <div class="form-group flex-2" style="flex: 2; margin-bottom: 0;">
+                <label>Search by Description, Detail, Amount, or Date</label>
+                <input type="text" name="search_query" required placeholder="e.g. 5000, Cement, Rahul, 2024-05-12" style="border-color: #16a34a; font-size: 1.1em; padding: 12px; font-weight: bold;">
+            </div>
+            <button class="btn btn-success" type="submit" style="height: 48px; padding: 0 30px; font-size: 1.1em;">🔍 Find Voucher</button>
+        </form>
+    </div>
+    
+    {% if results %}
+    <div class="card" style="margin-top: 20px; padding: 0;">
+        <table style="width: 100%; border: none;">
+            <tr style="background: #f0fdf4;">
+                <th style="padding-left: 20px; color: #16a34a;">Date & Time</th>
+                <th style="color: #16a34a;">Category / Ledger</th>
+                <th style="color: #16a34a;">Description</th>
+                <th style="text-align: right; color: #16a34a;">Amount</th>
+                <th style="text-align: center; padding-right: 20px; color: #16a34a;">Action</th>
+            </tr>
+            {% for t in results %}
+            <tr style="border-bottom: 1px solid #e5e7eb;">
+                <td style="padding-left: 20px;"><span style="font-weight: bold;">{{ t.date }}</span><br><small style="color:#6b7280;">{{ t.time }}</small></td>
+                <td><span class="badge badge-mode">{{ t.category }}</span><br><small style="color:#4b5563; font-weight:bold; text-transform: uppercase;">{{ t.type }}</small></td>
+                <td style="white-space: pre-wrap;">{{ t.description }}</td>
+                <td style="text-align: right;"><strong style="color:{% if t.type in ['expense', 'dasti_out', 'dasti_voucher_out', 'split_expense', 'settlement', 'batch_ledger_out'] %}#dc2626{% else %}#16a34a{% endif %};">₹{{ "{:,.2f}".format(t.amount) }}</strong></td>
+                <td style="text-align: center; padding-right: 20px;">
+                    <a href="/edit/transactions/{{ t.id }}" class="btn btn-sm" style="background:#f59e0b; color:white; font-weight:bold; padding: 8px 15px;">✏️ Update Voucher</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% elif has_searched %}
+    <div class="card" style="margin-top: 20px; text-align: center; padding: 40px; color: #6b7280; font-size: 1.1em;">
+        ❌ No vouchers found matching your search query.
+    </div>
+    {% endif %}
+</div></body></html>'''
 
 BULK_EDIT_DATE_TEMPLATE = '''<!DOCTYPE html><html><head><title>Bulk Date Correction</title>''' + BASE_STYLE + '''</head><body>
     <div class="container">''' + NAVBAR_HTML + '''
@@ -3232,7 +3306,8 @@ def update_settings():
         'report_flag_mode': request.form.get('report_flag_mode', 'both'),
         'report_pdf_format': request.form.get('report_pdf_format', 'standard'),
         'dashboard_sort_order': request.form.get('dashboard_sort_order', 'desc'),
-        'dashboard_table_filter': request.form.get('dashboard_table_filter', 'strict') # <-- ADD THIS LINE
+        'dashboard_table_filter': request.form.get('dashboard_table_filter', 'strict'),
+        'hide_dot_descriptions': request.form.get('hide_dot_descriptions', 'show') # <-- NEW SETTING
     }, merge=True)
     return redirect(url_for('manage_users'))
     
@@ -3817,8 +3892,12 @@ def bulk_hard_delete_trash():
 
 @app.route('/reports')
 def reports():
-    if 'user_id' not in session or (session.get('can_view_reports') != 1 and session.get('role') != 'superadmin'): return redirect(url_for('index'))
+    if 'user_id' not in session or (session.get('can_view_reports') != 1 and session.get('role') != 'superadmin'): 
+        return redirect(url_for('index'))
+    
+    import re
     firm_id = session['firm_id']
+    sys_settings = get_global_settings()  # Get settings
     
     start_date = request.args.get('start_date', '')
     end_date = request.args.get('end_date', '')
@@ -3828,46 +3907,124 @@ def reports():
     collection_name = 'transactions'
     pid_filter = None
     pid_field = None
+    selected_person_name = ""
     
     if report_account.startswith('person_'):
         collection_name = 'person_ledger'
         pid_filter = report_account.split('_')[1]
         pid_field = 'person_id'
+        p_doc = db.collection('persons').document(pid_filter).get()
+        selected_person_name = p_doc.to_dict().get('name', '') if p_doc.exists else "Person"
     elif report_account.startswith('dasti_'):
         collection_name = 'dasti_ledger'
         pid_filter = report_account.split('_')[1]
         pid_field = 'dasti_person_id'
+        d_doc = db.collection('dasti_persons').document(pid_filter).get()
+        selected_person_name = d_doc.to_dict().get('name', '') if d_doc.exists else "Dasti"
         
     query = db.collection(collection_name).where('user_id', '==', firm_id).where('deleted', '==', 0)
     if pid_filter: query = query.where(pid_field, '==', pid_filter)
     
     raw_results = [doc.to_dict() for doc in query.stream() if doc.to_dict().get('type') not in ('split_master_out', 'split_master_in')]
     
-    results = []
+    filtered_results = []
     for r in raw_results:
         if start_date and r.get('date', '') < start_date: continue
         if end_date and r.get('date', '') > end_date: continue
         if category and r.get('category', '') != category: continue
-        results.append(r)
         
-    results.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
-    total_in = sum(float(r.get('amount', 0)) for r in results if r.get('type') in ('income', 'settlement', 'dasti_voucher_in'))
+        # HIDE DOT DESCRIPTIONS OPTION
+        if sys_settings.get('hide_dot_descriptions', 'show') == 'hide' and r.get('description', '').strip() == '.':
+            continue
+            
+        # Clean descriptions dynamically for the Main Cashbook
+        if report_account == 'main':
+            desc = r.get('description', '')
+            desc = desc.replace('Transfer In ', '').replace('Transfer Out ', '').replace('Dasti In ', '').replace('Dasti Out ', '')
+            desc = re.sub(r'\(.*?\)\s*:?\s*', '', desc).strip()
+            r['description'] = desc
+            
+        filtered_results.append(r)
+        
+    # Sort chronologically (Oldest first) to accurately calculate the running balance
+    filtered_results.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=False)
     
-    if report_account == 'main':
-        total_out = sum(float(r.get('amount', 0)) for r in results if r.get('type') in ('expense', 'dasti_out', 'dasti_voucher_out'))
-    else:
-        total_out = sum(float(r.get('amount', 0)) for r in results if r.get('type') in ('expense', 'advance', 'dasti_out', 'dasti_voucher_out'))
+    running_bal = 0.0
+    cat_breakdown = {}
+    
+    for r in filtered_results:
+        amt = float(r.get('amount', 0))
+        t_type = r.get('type')
+        cat = r.get('category', 'Uncategorized')
+        
+        if cat not in cat_breakdown:
+            cat_breakdown[cat] = {'count': 0, 'in': 0.0, 'out': 0.0, 'net': 0.0}
+            
+        cat_breakdown[cat]['count'] += 1
+        
+        if report_account == 'main':
+            if t_type in ('income', 'settlement', 'dasti_voucher_in', 'direct_in', 'split_income'):
+                running_bal += amt
+                cat_breakdown[cat]['in'] += amt
+                r['cash_in'] = amt
+                r['cash_out'] = 0
+            else:
+                running_bal -= amt
+                cat_breakdown[cat]['out'] += amt
+                r['cash_in'] = 0
+                r['cash_out'] = amt
+        else:
+            # For Person/Dasti: Advance means firm gave them money (They owe firm -> Positive Balance)
+            if t_type in ('advance', 'dasti_out', 'dasti_voucher_out'):
+                running_bal += amt
+                cat_breakdown[cat]['out'] += amt # Money went out to them
+                r['cash_in'] = 0
+                r['cash_out'] = amt
+            else: 
+                running_bal -= amt
+                cat_breakdown[cat]['in'] += amt # Money came back from them
+                r['cash_in'] = amt
+                r['cash_out'] = 0
+                
+        r['running_balance'] = running_bal
+        
+        if report_account == 'main':
+            cat_breakdown[cat]['net'] = cat_breakdown[cat]['in'] - cat_breakdown[cat]['out']
+        else:
+            cat_breakdown[cat]['net'] = cat_breakdown[cat]['out'] - cat_breakdown[cat]['in']
+            
+    # Re-sort descending (Newest first) for the final display to match the PDF
+    filtered_results.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
+    
+    cat_list = [{'name': k, **v} for k, v in sorted(cat_breakdown.items())]
+    
+    total_in = sum(c['in'] for c in cat_list)
+    total_out = sum(c['out'] for c in cat_list)
+    net_balance = running_bal
     
     persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('persons').where('user_id', '==', firm_id).stream()]
     dasti_persons = [{'id': doc.id, **doc.to_dict()} for doc in db.collection('dasti_persons').where('user_id', '==', firm_id).stream()]
     cats = get_categories(firm_id)
     
-    return render_template_string(REPORTS_TEMPLATE, results=results, total_in=total_in, total_out=total_out, categories=cats, persons=persons, dasti_persons=dasti_persons, start_date=start_date, end_date=end_date, category=category, report_account=report_account, username=session['username'], active_page='reports')
+    # Generate timestamp for report header
+    report_generated_time = datetime.now(IST).strftime('%d %b %Y %I:%M %p')
+    
+    return render_template_string(
+        REPORTS_TEMPLATE, 
+        results=filtered_results, total_in=total_in, total_out=total_out, net_balance=net_balance,
+        cat_breakdown=cat_list, report_generated_time=report_generated_time, total_txns=len(filtered_results),
+        categories=cats, persons=persons, dasti_persons=dasti_persons, 
+        start_date=start_date, end_date=end_date, category=category, 
+        report_account=report_account, selected_person_name=selected_person_name,
+        username=session['username'], active_page='reports'
+    )
 
 @app.route('/export_reports')
 def export_reports():
     if 'user_id' not in session or (session.get('can_view_reports') != 1 and session.get('role') != 'superadmin'): return redirect(url_for('index'))
+    import re
     firm_id = session['firm_id']
+    sys_settings = get_global_settings() # Get settings
     
     start_date, end_date, category, report_account = request.args.get('start_date', ''), request.args.get('end_date', ''), request.args.get('category', ''), request.args.get('report_account', 'main')
     
@@ -3895,10 +4052,15 @@ def export_reports():
         if end_date and r.get('date', '') > end_date: continue
         if category and r.get('category', '') != category: continue
         
+        # HIDE DOT DESCRIPTIONS OPTION
+        if sys_settings.get('hide_dot_descriptions', 'show') == 'hide' and r.get('description', '').strip() == '.':
+            continue
+            
         # Auto-remove prefixes for main cashbook export
         if report_account == 'main':
             desc = r.get('description', '')
             desc = desc.replace('Transfer In ', '').replace('Transfer Out ', '').replace('Dasti In ', '').replace('Dasti Out ', '')
+            desc = re.sub(r'\(.*?\)\s*:?\s*', '', desc).strip()
             r['description'] = desc
             
         results.append(r)
@@ -4157,6 +4319,7 @@ def edit_entry(table_name, row_id):
         else:
             new_status, approved_by = entry.get('status'), entry.get('approved_by', '')
 
+        # --- IF SAVING A SPLIT VOUCHER ---
         if request.form.get('is_split_edit') == '1':
             master_desc = request.form['description'].strip()
             natures = request.form.getlist('txn_nature[]')
@@ -4246,6 +4409,7 @@ def edit_entry(table_name, row_id):
             batch.commit()
             return redirect(request.referrer or url_for('index'))
 
+        # --- IF SAVING A NORMAL VOUCHER ---
         cat_raw = request.form.get('category', entry.get('category', ''))
         custom_cat = request.form.get('custom_category', '').strip()
         category = custom_cat if cat_raw == 'Other' and custom_cat else cat_raw
@@ -4579,7 +4743,9 @@ def bulk_delete():
         return redirect(request.referrer or url_for('index'))
     
     batch = db.batch()
-    for link_id in selected_links:
+    for val in selected_links:
+        # Extract link_id safely (Handles the new "link_id|doc_id" format from the inline editor)
+        link_id = val.split('|')[0] if '|' in val else val
         for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
             docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', session['firm_id']).stream()
             for d in docs:
@@ -5301,24 +5467,19 @@ def bulk_edit_date():
                 if data.get('type') in ('split_master_in', 'split_master_out'):
                     continue
                     
-                data['id'] = d.id  # Ensure ID is included for the Edit button link
+                data['id'] = d.id
                 date_val = data.get('date', '')
                 
                 if start_date <= date_val <= end_date:
-                    # Apply Amount Filter if provided
                     if search_amount:
                         try:
-                            if float(data.get('amount', 0)) != float(search_amount):
-                                continue
-                        except ValueError:
-                            pass
+                            if float(data.get('amount', 0)) != float(search_amount): continue
+                        except ValueError: pass
                             
-                    # Apply Description/Category Filter if provided
                     if search_desc:
                         desc_text = data.get('description', '').lower()
                         cat_text = data.get('category', '').lower()
-                        if search_desc not in desc_text and search_desc not in cat_text:
-                            continue
+                        if search_desc not in desc_text and search_desc not in cat_text: continue
                             
                     results.append(data)
                     
@@ -5327,27 +5488,59 @@ def bulk_edit_date():
             
         elif action == 'update_dates':
             selected_links = request.form.getlist('selected_links')
-            new_date = request.form.get('new_date')
             
-            if selected_links and new_date:
+            # Capture the Mass Override fields (if user used the top bar instead of inline)
+            mass_date = request.form.get('new_date')
+            mass_category = request.form.get('new_category')
+            mass_mode = request.form.get('new_mode')
+            mass_desc = request.form.get('new_desc', '').strip()
+            mass_amount_raw = request.form.get('new_amount', '').strip()
+            
+            if selected_links:
                 batch = db.batch()
                 updated_count = 0
                 
-                for link_id in selected_links:
-                    for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
-                        docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', firm_id).stream()
-                        for d in docs:
-                            batch.update(d.reference, {'date': new_date})
-                            updated_count += 1
-                            
+                for val in selected_links:
+                    # Unpack the specific link_id and document ID
+                    link_id, t_id = val.split('|') if '|' in val else (val, None)
+                    
+                    if t_id:
+                        # Grab the inline specific edits for this exact row
+                        row_date = mass_date or request.form.get(f'date_{t_id}')
+                        row_time = request.form.get(f'time_{t_id}')
+                        row_category = mass_category or request.form.get(f'category_{t_id}')
+                        row_mode = mass_mode or request.form.get(f'mode_{t_id}')
+                        row_desc = mass_desc if mass_desc else request.form.get(f'desc_{t_id}', '').strip()
+                        row_amt_raw = mass_amount_raw if mass_amount_raw else request.form.get(f'amount_{t_id}', '').strip()
+                        
+                        update_data = {}
+                        if row_date: update_data['date'] = row_date
+                        if row_time: update_data['time'] = row_time
+                        if row_category: update_data['category'] = row_category
+                        if row_mode: update_data['payment_mode'] = row_mode
+                        if row_desc: update_data['description'] = row_desc
+                        if row_amt_raw:
+                            try: update_data['amount'] = float(row_amt_raw)
+                            except ValueError: pass
+                        
+                        if update_data:
+                            # Apply these specific inline edits to all linked ledger documents
+                            for collection in ['transactions', 'person_ledger', 'dasti_ledger']:
+                                docs = db.collection(collection).where('link_id', '==', link_id).where('user_id', '==', firm_id).stream()
+                                for d in docs:
+                                    batch.update(d.reference, update_data)
+                                    updated_count += 1
+                                    
+                                    if updated_count >= 450:
+                                        batch.commit()
+                                        batch = db.batch()
+                                        updated_count = 0
+                                
                 if updated_count > 0:
                     batch.set(db.collection('edit_logs').document(), {
-                        'firm_id': firm_id,
-                        'link_id': 'bulk_edit',
-                        'edited_by': session['username'],
-                        'changes': f"Bulk changed date to {new_date} for {len(selected_links)} distinct vouchers.",
-                        'details': "Bulk Date Correction Tool",
-                        'timestamp': int(time.time() * 1000),
+                        'firm_id': firm_id, 'link_id': 'bulk_edit', 'edited_by': session['username'],
+                        'changes': f"Inline Multi-Row Updated fields for {len(selected_links)} distinct vouchers.",
+                        'details': "Mass Auto-Update Tool Executed", 'timestamp': int(time.time() * 1000),
                         'date_formatted': datetime.now(IST).strftime('%d-%b-%Y %I:%M %p')
                     })
                     
@@ -5355,8 +5548,8 @@ def bulk_edit_date():
             
             return redirect(url_for('bulk_edit_date'))
 
-    return render_template_string(BULK_EDIT_DATE_TEMPLATE, results=results, has_searched=has_searched, start_date=start_date, end_date=end_date, search_amount=search_amount, search_desc=search_desc, username=session['username'], active_page='bulk_date')
-
+    cats = get_categories(firm_id)
+    return render_template_string(BULK_EDIT_DATE_TEMPLATE, results=results, has_searched=has_searched, start_date=start_date, end_date=end_date, search_amount=search_amount, search_desc=search_desc, categories=cats, username=session['username'], active_page='bulk_date')
 @app.route('/repair_ledger_math')
 def repair_ledger_math():
     if 'user_id' not in session or session.get('role') != 'superadmin':
@@ -5472,5 +5665,44 @@ def auto_fix_splits():
         
     return redirect(url_for('audit_ledger'))
 
+
+@app.route('/find_voucher', methods=['GET', 'POST'])
+def find_voucher():
+    if 'user_id' not in session or (session.get('can_edit') != 1 and session.get('role') != 'superadmin'): 
+        return redirect(url_for('index'))
+    
+    results = []
+    has_searched = False
+    firm_id = session['firm_id']
+    
+    if request.method == 'POST':
+        query_text = request.form.get('search_query', '').strip().lower()
+        if query_text:
+            has_searched = True
+            docs = db.collection('transactions').where('user_id', '==', firm_id).where('deleted', '==', 0).stream()
+            
+            for d in docs:
+                data = d.to_dict()
+                
+                # Exclude splits parts to avoid clutter, focus on Masters or standard entries
+                if data.get('type') in ('split_income', 'split_expense'):
+                    continue
+                    
+                data['id'] = d.id
+                
+                # Search logic
+                match = False
+                if query_text in data.get('description', '').lower(): match = True
+                elif query_text in data.get('category', '').lower(): match = True
+                elif query_text in data.get('date', ''): match = True
+                elif query_text == str(data.get('amount', '')): match = True
+                elif query_text in data.get('link_id', '').lower(): match = True
+                
+                if match:
+                    results.append(data)
+                    
+            results.sort(key=lambda x: (x.get('date', ''), x.get('time', ''), x.get('created_at', 0)), reverse=True)
+            
+    return render_template_string(FIND_VOUCHER_TEMPLATE, results=results, has_searched=has_searched, username=session['username'], active_page='update')
 if __name__ == '__main__':
     pass
